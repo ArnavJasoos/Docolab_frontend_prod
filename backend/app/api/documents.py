@@ -1,27 +1,47 @@
 import uuid
 from fastapi import APIRouter, Depends, HTTPException, Query, status
-from sqlalchemy.orm import Session
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.database import get_db
 from app.api.deps import get_current_user
-from app.models.database_models import Document, User, Folder
+from app.models.database_models import Document, User, Folder, Role, Assignment
 from app.schemas.document import DocumentCreate, DocumentResponse, DocumentListResponse, AuthorizeCheckResponse, DocumentUpdate
 from app.services.auth_service import authorize
 
 router = APIRouter()
 
+
+async def _grant_owner(db: AsyncSession, user: User, scope_type: str, scope_id):
+    """Creator-owns: grant the creator the org's owner role on the new scope."""
+    owner_role = (
+        await db.execute(select(Role).where(Role.org_id == user.org_id, Role.name == "owner"))
+    ).scalars().first()
+    if owner_role is None:
+        return
+    db.add(Assignment(
+        org_id=user.org_id,
+        user_id=user.id,
+        role_id=owner_role.id,
+        scope_type=scope_type,
+        scope_id=scope_id,
+    ))
+
+
 @router.post("", response_model=DocumentResponse, status_code=status.HTTP_201_CREATED)
-def create_document(data: DocumentCreate, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
-    folder = db.query(Folder).filter(Folder.id == data.folder_id).first()
+async def create_document(data: DocumentCreate, db: AsyncSession = Depends(get_db), current_user: User = Depends(get_current_user)):
+    folder = (
+        await db.execute(select(Folder).where(Folder.id == data.folder_id))
+    ).scalars().first()
     if not folder:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Folder not found")
 
-    doc_id = str(uuid.uuid4())
+    doc_id = uuid.uuid4()
     doc = Document(
         id=doc_id,
         org_id=current_user.org_id,
         folder_id=data.folder_id,
         title=data.title,
-        yjs_doc_key=doc_id,
+        yjs_doc_key=str(doc_id),
         schema_version=1,
         status="working",
         current_version_no=0,
@@ -30,68 +50,81 @@ def create_document(data: DocumentCreate, db: Session = Depends(get_db), current
         created_by=current_user.id
     )
     db.add(doc)
-    db.commit()
-    db.refresh(doc)
+    await db.flush()
+    # Creator becomes owner of the document they create (document-scoped), so a
+    # junior asked to "create the document" owns it and can later hand it over.
+    await _grant_owner(db, current_user, "document", doc.id)
+    await db.commit()
+    await db.refresh(doc)
     return doc
 
 @router.get("", response_model=DocumentListResponse)
-def list_documents(folder_id: str, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
-    docs = db.query(Document).filter(Document.folder_id == folder_id).all()
+async def list_documents(folder_id: str, db: AsyncSession = Depends(get_db), current_user: User = Depends(get_current_user)):
+    docs = (
+        await db.execute(select(Document).where(Document.folder_id == folder_id))
+    ).scalars().all()
     return {"documents": docs}
 
 @router.get("/{id}", response_model=DocumentResponse)
-def get_document(id: str, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
+async def get_document(id: str, db: AsyncSession = Depends(get_db), current_user: User = Depends(get_current_user)):
     """Get a single document by ID"""
-    doc = db.query(Document).filter(Document.id == id, Document.org_id == current_user.org_id).first()
+    doc = (
+        await db.execute(select(Document).where(Document.id == id, Document.org_id == current_user.org_id))
+    ).scalars().first()
     if not doc:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Document not found")
     return doc
 
 @router.patch("/{id}", response_model=DocumentResponse)
-def update_document(
-    id: str, 
-    data: DocumentUpdate, 
-    db: Session = Depends(get_db), 
+async def update_document(
+    id: str,
+    data: DocumentUpdate,
+    db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ):
     """Update document (rename or move to different folder)"""
-    doc = db.query(Document).filter(Document.id == id, Document.org_id == current_user.org_id).first()
+    doc = (
+        await db.execute(select(Document).where(Document.id == id, Document.org_id == current_user.org_id))
+    ).scalars().first()
     if not doc:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Document not found")
-    
-    # Update title
+
     if data.title is not None:
         doc.title = data.title
-    
-    # Update folder
+
     if data.folder_id is not None:
-        folder = db.query(Folder).filter(Folder.id == data.folder_id, Folder.org_id == current_user.org_id).first()
+        folder = (
+            await db.execute(select(Folder).where(Folder.id == data.folder_id, Folder.org_id == current_user.org_id))
+        ).scalars().first()
         if not folder:
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Folder not found")
         doc.folder_id = data.folder_id
-    
-    db.commit()
-    db.refresh(doc)
+
+    await db.commit()
+    await db.refresh(doc)
     return doc
 
 @router.delete("/{id}", status_code=status.HTTP_204_NO_CONTENT)
-def delete_document(id: str, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
+async def delete_document(id: str, db: AsyncSession = Depends(get_db), current_user: User = Depends(get_current_user)):
     """Soft delete a document"""
-    doc = db.query(Document).filter(Document.id == id, Document.org_id == current_user.org_id).first()
+    doc = (
+        await db.execute(select(Document).where(Document.id == id, Document.org_id == current_user.org_id))
+    ).scalars().first()
     if not doc:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Document not found")
-    
-    # Soft delete: change status to deleted
+
     doc.status = "deleted"
-    db.commit()
+    await db.commit()
 
 @router.get("/{id}/authorize-check", response_model=AuthorizeCheckResponse)
-def check_authorization(id: str, permission: str = Query(...), db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
-    doc = db.query(Document).filter(Document.id == id).first()
+async def check_authorization(id: str, permission: str = Query(...), db: AsyncSession = Depends(get_db), current_user: User = Depends(get_current_user)):
+    doc = (
+        await db.execute(select(Document).where(Document.id == id))
+    ).scalars().first()
     if not doc:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Document not found")
-        
-    allowed, resolved_role, via_scope = authorize(
+
+    allowed, resolved_role, via_scope = await authorize(
         db=db,
         user_id=current_user.id,
         permission=permission,

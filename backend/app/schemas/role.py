@@ -1,8 +1,9 @@
+import uuid
 from pydantic import BaseModel
 from typing import List
 
 class RoleResponse(BaseModel):
-    id: str
+    id: uuid.UUID
     name: str
     permissions: List[str]
 

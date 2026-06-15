@@ -1,14 +1,16 @@
+import uuid
+from datetime import datetime
 from pydantic import BaseModel
 from typing import Optional
 
 
 class VersionResponse(BaseModel):
-    id: str
-    document_id: str
+    id: uuid.UUID
+    document_id: uuid.UUID
     version_no: int
     kind: str  # submission / approved
-    created_by: str
-    created_at: str
+    created_by: uuid.UUID
+    created_at: datetime
     s3_key: str
 
     class Config:
@@ -20,12 +22,12 @@ class VersionListResponse(BaseModel):
 
 
 class VersionMetadataResponse(BaseModel):
-    id: str
-    document_id: str
+    id: uuid.UUID
+    document_id: uuid.UUID
     version_no: int
     kind: str
-    created_by: str
-    created_at: str
+    created_by: uuid.UUID
+    created_at: datetime
     s3_url: str  # Signed S3 URL
 
     class Config:

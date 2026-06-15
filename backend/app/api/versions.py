@@ -1,12 +1,11 @@
 import uuid
-from datetime import datetime
 from fastapi import APIRouter, Depends, HTTPException, Query, status
-from sqlalchemy.orm import Session
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.database import get_db
 from app.api.deps import get_current_user
 from app.models.database_models import (
-    Document, User, Version, ApprovalMarker, ApprovalStepEvent,
-    ApprovalPolicy, Notification
+    Document, User, Version, ApprovalMarker, ApprovalStepEvent, Notification
 )
 from app.schemas.version import (
     VersionResponse, VersionListResponse, VersionMetadataResponse,
@@ -19,9 +18,9 @@ from app.services.auth_service import authorize
 router = APIRouter()
 
 
-def check_permission(db: Session, user_id: str, doc_id: str, permission: str):
+async def check_permission(db: AsyncSession, user_id, doc_id, permission: str):
     """Helper to check permission and raise 403 if denied."""
-    has_perm, _, _ = authorize(db, user_id, permission, "document", doc_id)
+    has_perm, _, _ = await authorize(db, user_id, permission, "document", doc_id)
     if not has_perm:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
@@ -30,95 +29,77 @@ def check_permission(db: Session, user_id: str, doc_id: str, permission: str):
 
 
 @router.get("/documents/{id}/versions", response_model=VersionListResponse)
-def list_versions(
+async def list_versions(
     id: str,
-    db: Session = Depends(get_db),
+    db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ):
     """List version history for a document."""
-    doc = db.query(Document).filter(
-        Document.id == id,
-        Document.org_id == current_user.org_id
-    ).first()
+    doc = (
+        await db.execute(select(Document).where(Document.id == id, Document.org_id == current_user.org_id))
+    ).scalars().first()
     if not doc:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Document not found"
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Document not found")
+
+    await check_permission(db, current_user.id, doc.id, "can_view_history")
+
+    versions = (
+        await db.execute(
+            select(Version).where(Version.document_id == id).order_by(Version.version_no.desc())
         )
-
-    # Check authorization
-    check_permission(db, current_user.id, doc.id, "can_view_history")
-
-    versions = db.query(Version).filter(
-        Version.document_id == id
-    ).order_by(Version.version_no.desc()).all()
+    ).scalars().all()
 
     return {"versions": versions}
 
 
 @router.get("/versions/{id}", response_model=VersionMetadataResponse)
-def get_version(
+async def get_version(
     id: str,
-    db: Session = Depends(get_db),
+    db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ):
     """Get version metadata and signed S3 URL."""
-    version = db.query(Version).filter(Version.id == id).first()
+    version = (await db.execute(select(Version).where(Version.id == id))).scalars().first()
     if not version:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Version not found"
-        )
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Version not found")
 
-    doc = db.query(Document).filter(
-        Document.id == version.document_id,
-        Document.org_id == current_user.org_id
-    ).first()
+    doc = (
+        await db.execute(select(Document).where(Document.id == version.document_id, Document.org_id == current_user.org_id))
+    ).scalars().first()
     if not doc:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Document not found"
-        )
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Document not found")
 
-    # Check authorization
-    check_permission(db, current_user.id, doc.id, "can_view_history")
+    await check_permission(db, current_user.id, doc.id, "can_view_history")
 
-    # Generate signed S3 URL (placeholder)
     s3_url = f"s3://signed-url/{version.s3_key}"
 
     return {
-        "id": str(version.id),
-        "document_id": str(version.document_id),
+        "id": version.id,
+        "document_id": version.document_id,
         "version_no": version.version_no,
         "kind": version.kind,
-        "created_by": str(version.created_by),
+        "created_by": version.created_by,
         "created_at": version.created_at,
         "s3_url": s3_url
     }
 
 
 @router.post("/documents/{id}/submit-for-approval", response_model=SubmitForApprovalResponse)
-def submit_for_approval(
+async def submit_for_approval(
     id: str,
     data: SubmitForApprovalRequest,
-    db: Session = Depends(get_db),
+    db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ):
     """Freeze warm snapshot and submit for approval."""
-    doc = db.query(Document).filter(
-        Document.id == id,
-        Document.org_id == current_user.org_id
-    ).first()
+    doc = (
+        await db.execute(select(Document).where(Document.id == id, Document.org_id == current_user.org_id))
+    ).scalars().first()
     if not doc:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Document not found"
-        )
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Document not found")
 
-    # Check authorization
-    check_permission(db, current_user.id, doc.id, "can_submit_for_approval")
+    await check_permission(db, current_user.id, doc.id, "can_submit_for_approval")
 
-    # Create new version (submission kind)
     new_version_no = doc.current_version_no + 1
     version = Version(
         id=uuid.uuid4(),
@@ -130,31 +111,27 @@ def submit_for_approval(
         created_by=current_user.id
     )
     db.add(version)
-    db.commit()
-    db.refresh(version)
+    await db.flush()
 
-    # Create notification for approvers
-    policy = doc.approval_policy
-    if policy:
-        # Get approvers for the first step
-        first_step = db.query(ApprovalPolicy).filter(
-            ApprovalPolicy.id == policy.id
-        ).first()
-        if first_step:
-            notification = Notification(
-                id=uuid.uuid4(),
-                org_id=current_user.org_id,
-                user_id=current_user.id,
-                document_id=doc.id,
-                type="submission_pending",
-                payload={
-                    "version_id": str(version.id),
-                    "version_no": new_version_no,
-                    "submitter": str(current_user.id)
-                }
-            )
-            db.add(notification)
-            db.commit()
+    # If the doc has an approval policy attached, notify (chain path). The FK
+    # column is read directly (no lazy relationship load under async).
+    if doc.approval_policy_id is not None:
+        notification = Notification(
+            id=uuid.uuid4(),
+            org_id=current_user.org_id,
+            user_id=current_user.id,
+            document_id=doc.id,
+            type="submission_pending",
+            payload={
+                "version_id": str(version.id),
+                "version_no": new_version_no,
+                "submitter": str(current_user.id)
+            }
+        )
+        db.add(notification)
+
+    await db.commit()
+    await db.refresh(version)
 
     return {
         "version_id": str(version.id),
@@ -164,41 +141,31 @@ def submit_for_approval(
 
 
 @router.get("/documents/{id}/diff")
-def get_diff(
+async def get_diff(
     id: str,
     from_v: int = Query(..., alias="from"),
     to_v: int = Query(..., alias="to"),
-    db: Session = Depends(get_db),
+    db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ):
     """Compute diff between two versions (owner review + team comparison)."""
-    doc = db.query(Document).filter(
-        Document.id == id,
-        Document.org_id == current_user.org_id
-    ).first()
+    doc = (
+        await db.execute(select(Document).where(Document.id == id, Document.org_id == current_user.org_id))
+    ).scalars().first()
     if not doc:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Document not found"
-        )
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Document not found")
 
-    # Check authorization
-    check_permission(db, current_user.id, doc.id, "can_view_history")
+    await check_permission(db, current_user.id, doc.id, "can_view_history")
 
-    from_version = db.query(Version).filter(
-        Version.document_id == id,
-        Version.version_no == from_v
-    ).first()
-    to_version = db.query(Version).filter(
-        Version.document_id == id,
-        Version.version_no == to_v
-    ).first()
+    from_version = (
+        await db.execute(select(Version).where(Version.document_id == id, Version.version_no == from_v))
+    ).scalars().first()
+    to_version = (
+        await db.execute(select(Version).where(Version.document_id == id, Version.version_no == to_v))
+    ).scalars().first()
 
     if not from_version or not to_version:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="One or both versions not found"
-        )
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="One or both versions not found")
 
     return {
         "from_version_no": from_v,
@@ -212,50 +179,40 @@ def get_diff(
 
 
 @router.post("/versions/{id}/approve", response_model=ApprovalResponse)
-def approve_version(
+async def approve_version(
     id: str,
     data: ApprovalRequest,
-    db: Session = Depends(get_db),
+    db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ):
     """Policy-aware approval: write marker only when chain completes."""
-    version = db.query(Version).filter(Version.id == id).first()
+    version = (await db.execute(select(Version).where(Version.id == id))).scalars().first()
     if not version:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Version not found"
-        )
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Version not found")
 
-    doc = db.query(Document).filter(
-        Document.id == version.document_id,
-        Document.org_id == current_user.org_id
-    ).first()
+    doc = (
+        await db.execute(select(Document).where(Document.id == version.document_id, Document.org_id == current_user.org_id))
+    ).scalars().first()
     if not doc:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Document not found"
-        )
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Document not found")
 
-    # Check authorization
-    check_permission(db, current_user.id, doc.id, "can_give_final_approval")
+    await check_permission(db, current_user.id, doc.id, "can_give_final_approval")
 
-    # Record approval step event
-    policy = doc.approval_policy
-    step_no = 1  # Default to first step
+    # Record a step event only when a policy is attached (single-gate / NULL
+    # policy writes no approval_step_events row — per the design, and required
+    # because ApprovalStepEvent.policy_id is NOT NULL).
+    if doc.approval_policy_id is not None:
+        db.add(ApprovalStepEvent(
+            id=uuid.uuid4(),
+            org_id=current_user.org_id,
+            document_id=doc.id,
+            version_id=version.id,
+            policy_id=doc.approval_policy_id,
+            step_no=1,
+            decision="approved",
+            actor_id=current_user.id
+        ))
 
-    event = ApprovalStepEvent(
-        id=uuid.uuid4(),
-        org_id=current_user.org_id,
-        document_id=doc.id,
-        version_id=version.id,
-        policy_id=policy.id if policy else None,
-        step_no=step_no,
-        decision="approved",
-        actor_id=current_user.id
-    )
-    db.add(event)
-
-    # Create approval marker (marks this as the baseline)
     marker = ApprovalMarker(
         id=uuid.uuid4(),
         org_id=current_user.org_id,
@@ -265,100 +222,68 @@ def approve_version(
     )
     db.add(marker)
 
-    # Update version kind to "approved"
     version.kind = "approved"
 
-    db.commit()
+    await db.commit()
 
-    return {
-        "success": True,
-        "message": f"Version {version.version_no} approved"
-    }
+    return {"success": True, "message": f"Version {version.version_no} approved"}
 
 
 @router.post("/versions/{id}/reject", response_model=RejectResponse)
-def reject_version(
+async def reject_version(
     id: str,
     data: RejectRequest,
-    db: Session = Depends(get_db),
+    db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ):
     """Discard warm snapshot, baseline stays."""
-    version = db.query(Version).filter(Version.id == id).first()
+    version = (await db.execute(select(Version).where(Version.id == id))).scalars().first()
     if not version:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Version not found"
-        )
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Version not found")
 
-    doc = db.query(Document).filter(
-        Document.id == version.document_id,
-        Document.org_id == current_user.org_id
-    ).first()
+    doc = (
+        await db.execute(select(Document).where(Document.id == version.document_id, Document.org_id == current_user.org_id))
+    ).scalars().first()
     if not doc:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Document not found"
-        )
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Document not found")
 
-    # Check authorization
-    check_permission(db, current_user.id, doc.id, "can_give_final_approval")
+    await check_permission(db, current_user.id, doc.id, "can_give_final_approval")
 
-    # Record rejection step event
-    policy = doc.approval_policy
-    step_no = 1  # Default to first step
+    if doc.approval_policy_id is not None:
+        db.add(ApprovalStepEvent(
+            id=uuid.uuid4(),
+            org_id=current_user.org_id,
+            document_id=doc.id,
+            version_id=version.id,
+            policy_id=doc.approval_policy_id,
+            step_no=1,
+            decision="rejected",
+            actor_id=current_user.id
+        ))
 
-    event = ApprovalStepEvent(
-        id=uuid.uuid4(),
-        org_id=current_user.org_id,
-        document_id=doc.id,
-        version_id=version.id,
-        policy_id=policy.id if policy else None,
-        step_no=step_no,
-        decision="rejected",
-        actor_id=current_user.id
-    )
-    db.add(event)
-    db.commit()
+    await db.commit()
 
-    return {
-        "success": True,
-        "message": f"Version {version.version_no} rejected"
-    }
+    return {"success": True, "message": f"Version {version.version_no} rejected"}
 
 
 @router.post("/versions/{id}/restore", response_model=RestoreResponse)
-def restore_version(
+async def restore_version(
     id: str,
     data: RestoreRequest,
-    db: Session = Depends(get_db),
+    db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ):
     """Restore deleted section (stays pending)."""
-    version = db.query(Version).filter(Version.id == id).first()
+    version = (await db.execute(select(Version).where(Version.id == id))).scalars().first()
     if not version:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Version not found"
-        )
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Version not found")
 
-    doc = db.query(Document).filter(
-        Document.id == version.document_id,
-        Document.org_id == current_user.org_id
-    ).first()
+    doc = (
+        await db.execute(select(Document).where(Document.id == version.document_id, Document.org_id == current_user.org_id))
+    ).scalars().first()
     if not doc:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Document not found"
-        )
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Document not found")
 
-    # Check authorization
-    check_permission(db, current_user.id, doc.id, "can_edit_direct")
+    await check_permission(db, current_user.id, doc.id, "can_edit_direct")
 
-    # Restore logic: this would restore a deleted section from the version
-    # The section_id comes from the request and identifies what to restore
-
-    return {
-        "success": True,
-        "message": f"Section restored in version {version.version_no}"
-    }
+    return {"success": True, "message": f"Section restored in version {version.version_no}"}

@@ -1,3 +1,5 @@
+import uuid
+from datetime import datetime
 from pydantic import BaseModel, EmailStr
 from typing import Optional
 
@@ -14,21 +16,21 @@ class UserUpdate(BaseModel):
     status: Optional[str] = None
 
 class UserResponse(UserBase):
-    id: str
+    id: uuid.UUID
     avatar_color: Optional[str]
     status: str
-    created_at: str
+    created_at: datetime
 
     class Config:
         from_attributes = True
 
 class UserListItem(BaseModel):
-    id: str
+    id: uuid.UUID
     email: str
     display_name: str
     avatar_color: Optional[str]
     status: str
-    created_at: str
+    created_at: datetime
 
     class Config:
         from_attributes = True
@@ -43,3 +45,17 @@ class Token(BaseModel):
 class LoginRequest(BaseModel):
     email: EmailStr
     password: str
+
+class RefreshRequest(BaseModel):
+    refresh_token: str
+
+class RefreshResponse(BaseModel):
+    token: str
+    token_type: str = "bearer"
+
+class LogoutRequest(BaseModel):
+    refresh_token: str
+
+class LogoutResponse(BaseModel):
+    success: bool
+    message: str

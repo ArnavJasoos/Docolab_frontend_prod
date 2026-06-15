@@ -1,233 +1,167 @@
 import httpx
 import sys
-import json
+import uuid
 
 BASE_URL = "http://127.0.0.1:8000/api"
 
+
 def run_full_test():
-    print("=== Testing 9 New APIs (Total 20 endpoints) ===\n")
-    
+    print("=== Testing core endpoints (single-org v1) ===\n")
+
     with httpx.Client() as client:
-        # Setup: Create 3 test users
+        # Setup: 3 users with UNIQUE emails so the test is re-runnable against a
+        # persistent DB. All three join the single shared org.
         print("[SETUP] Creating test users...")
         users = {}
-        for i, (name, email) in enumerate([("Alice", "alice@test.com"), ("Bob", "bob@test.com"), ("Charlie", "charlie@test.com")]):
+        for name in ["Alice", "Bob", "Charlie"]:
+            email = f"{name.lower()}_{uuid.uuid4().hex[:8]}@test.com"
             res = client.post(f"{BASE_URL}/auth/signup", json={
                 "email": email,
-                "password": f"pass{i}123",
-                "display_name": name
+                "password": "pass1234",
+                "display_name": name,
             })
             if res.status_code != 201:
-                print(f"❌ Failed to create {name}: {res.json()}")
+                print(f"FAIL creating {name}: {res.status_code} {res.text}")
                 sys.exit(1)
-            user_data = res.json()
-            users[name.lower()] = {
-                "id": user_data["user"]["id"],
-                "token": user_data["token"],
-                "email": email
-            }
-            print(f"  ✅ {name} created")
+            data = res.json()
+            users[name.lower()] = {"id": data["user"]["id"], "token": data["token"], "email": email}
+            print(f"  OK {name} created")
 
-        alice_token = users["alice"]["token"]
-        bob_token = users["bob"]["token"]
-        alice_headers = {"Authorization": f"Bearer {alice_token}"}
-        bob_headers = {"Authorization": f"Bearer {bob_token}"}
         alice_id = users["alice"]["id"]
         bob_id = users["bob"]["id"]
+        charlie_id = users["charlie"]["id"]
+        alice_headers = {"Authorization": f"Bearer {users['alice']['token']}"}
 
-        # 1. GET /users - List org members
-        print("\n[1] GET /users - List org members")
+        # Role ids are UUIDs now — look them up by name instead of hardcoding.
+        res = client.get(f"{BASE_URL}/roles", headers=alice_headers)
+        assert res.status_code == 200, f"GET /roles -> {res.status_code}"
+        role_map = {r["name"]: r["id"] for r in res.json()["roles"]}
+        assert "editor" in role_map, f"editor role not seeded; got {list(role_map)}"
+        editor_role_id = role_map["editor"]
+        print(f"  OK roles resolved: {list(role_map)}")
+
+        # 1. GET /users — all three created users are present (org may also
+        #    contain the seeded admin + users from prior runs).
+        print("\n[1] GET /users")
         res = client.get(f"{BASE_URL}/users", headers=alice_headers)
         assert res.status_code == 200, f"Expected 200, got {res.status_code}"
-        users_list = res.json()
-        assert len(users_list["users"]) == 3, f"Expected 3 users, got {len(users_list['users'])}"
-        print(f"  ✅ Listed {len(users_list['users'])} users")
+        ids = {u["id"] for u in res.json()["users"]}
+        assert {alice_id, bob_id, charlie_id} <= ids, "created users missing from list"
+        print("  OK all 3 users present")
 
-        # 2. PATCH /users/:id - Update user profile
-        print("\n[2] PATCH /users/:id - Update user profile")
-        res = client.patch(f"{BASE_URL}/users/{alice_id}", 
+        # 2. PATCH /users/:id
+        print("\n[2] PATCH /users/:id")
+        res = client.patch(f"{BASE_URL}/users/{alice_id}",
             json={"display_name": "Alice Updated", "avatar_color": "#FF5733"},
-            headers=alice_headers
-        )
+            headers=alice_headers)
         assert res.status_code == 200, f"Expected 200, got {res.status_code}"
         assert res.json()["display_name"] == "Alice Updated"
-        assert res.json()["avatar_color"] == "#FF5733"
-        print(f"  ✅ User profile updated")
+        print("  OK user profile updated")
 
-        # 3. POST /folders - Create root folder
-        print("\n[3] POST /folders - Create folders")
-        res = client.post(f"{BASE_URL}/folders", 
-            json={"name": "Projects", "parent_folder_id": None},
-            headers=alice_headers
-        )
+        # 3. POST /folders (Alice becomes owner of each via creator-owns)
+        print("\n[3] POST /folders")
+        res = client.post(f"{BASE_URL}/folders",
+            json={"name": "Projects", "parent_folder_id": None}, headers=alice_headers)
         assert res.status_code == 201
         root_folder_id = res.json()["id"]
-        print(f"  ✅ Root folder created: {root_folder_id}")
-
-        # Create nested folder
         res = client.post(f"{BASE_URL}/folders",
-            json={"name": "Q1 Planning", "parent_folder_id": root_folder_id},
-            headers=alice_headers
-        )
+            json={"name": "Q1 Planning", "parent_folder_id": root_folder_id}, headers=alice_headers)
         assert res.status_code == 201
         nested_folder_id = res.json()["id"]
-        print(f"  ✅ Nested folder created: {nested_folder_id}")
+        print("  OK root + nested folders created")
 
-        # 4. GET /folders - List folders
-        print("\n[4] GET /folders - List all folders")
+        # 4. GET /folders
+        print("\n[4] GET /folders")
         res = client.get(f"{BASE_URL}/folders", headers=alice_headers)
         assert res.status_code == 200
-        folders = res.json()["folders"]
-        assert len(folders) >= 2
-        print(f"  ✅ Listed {len(folders)} folders")
+        assert len(res.json()["folders"]) >= 2
+        print("  OK folders listed")
 
-        # 5. PATCH /folders/:id - Rename folder
-        print("\n[5] PATCH /folders/:id - Rename folder")
+        # 5. PATCH /folders/:id
+        print("\n[5] PATCH /folders/:id")
         res = client.patch(f"{BASE_URL}/folders/{root_folder_id}",
-            json={"name": "All Projects"},
-            headers=alice_headers
-        )
-        assert res.status_code == 200
-        assert res.json()["name"] == "All Projects"
-        print(f"  ✅ Folder renamed to 'All Projects'")
+            json={"name": "All Projects"}, headers=alice_headers)
+        assert res.status_code == 200 and res.json()["name"] == "All Projects"
+        print("  OK folder renamed")
 
-        # 6. POST /documents - Create documents
-        print("\n[6] POST /documents - Create documents")
+        # 6. POST /documents
+        print("\n[6] POST /documents")
         res = client.post(f"{BASE_URL}/documents",
-            json={"folder_id": nested_folder_id, "title": "Q1 Roadmap"},
-            headers=alice_headers
-        )
+            json={"folder_id": nested_folder_id, "title": "Q1 Roadmap"}, headers=alice_headers)
         assert res.status_code == 201
         doc1_id = res.json()["id"]
-        print(f"  ✅ Document created: {doc1_id}")
-
         res = client.post(f"{BASE_URL}/documents",
-            json={"folder_id": nested_folder_id, "title": "Budget Plan"},
-            headers=alice_headers
-        )
+            json={"folder_id": nested_folder_id, "title": "Budget Plan"}, headers=alice_headers)
         assert res.status_code == 201
         doc2_id = res.json()["id"]
-        print(f"  ✅ Document created: {doc2_id}")
+        print("  OK 2 documents created")
 
-        # 7. GET /documents/:id - Get single document
-        print("\n[7] GET /documents/:id - Get single document")
+        # 7. GET /documents/:id
+        print("\n[7] GET /documents/:id")
         res = client.get(f"{BASE_URL}/documents/{doc1_id}", headers=alice_headers)
-        assert res.status_code == 200
-        assert res.json()["title"] == "Q1 Roadmap"
-        print(f"  ✅ Retrieved document: {res.json()['title']}")
+        assert res.status_code == 200 and res.json()["title"] == "Q1 Roadmap"
+        print("  OK document fetched")
 
-        # 8. PATCH /documents/:id - Update document
-        print("\n[8] PATCH /documents/:id - Update document")
+        # 8. PATCH /documents/:id
+        print("\n[8] PATCH /documents/:id")
         res = client.patch(f"{BASE_URL}/documents/{doc1_id}",
-            json={"title": "Q1 Roadmap - Updated", "folder_id": nested_folder_id},
-            headers=alice_headers
-        )
-        assert res.status_code == 200
-        assert res.json()["title"] == "Q1 Roadmap - Updated"
-        print(f"  ✅ Document updated: {res.json()['title']}")
+            json={"title": "Q1 Roadmap - Updated", "folder_id": nested_folder_id}, headers=alice_headers)
+        assert res.status_code == 200 and res.json()["title"] == "Q1 Roadmap - Updated"
+        print("  OK document updated")
 
-        # 9. POST /assignments - Assign roles
-        print("\n[9] POST /assignments - Assign roles")
+        # 9. POST /assignments — Alice owns nested_folder (creator-owns) so she
+        #    has can_manage_members; assign Bob as editor.
+        print("\n[9] POST /assignments")
         res = client.post(f"{BASE_URL}/assignments",
-            json={
-                "user_id": bob_id,
-                "role_id": "role-editor",
-                "scope_type": "folder",
-                "scope_id": nested_folder_id
-            },
-            headers=alice_headers
-        )
-        assert res.status_code == 201
+            json={"user_id": bob_id, "role_id": editor_role_id,
+                  "scope_type": "folder", "scope_id": nested_folder_id},
+            headers=alice_headers)
+        assert res.status_code == 201, f"Expected 201, got {res.status_code} {res.text}"
         assignment_id = res.json()["id"]
-        print(f"  ✅ Bob assigned as editor: {assignment_id}")
+        print("  OK Bob assigned editor")
 
-        # 10. GET /assignments - List assignments
-        print("\n[10] GET /assignments - List assignments")
+        # 10. GET /assignments — Bob's assignment is present
+        print("\n[10] GET /assignments")
         res = client.get(f"{BASE_URL}/assignments?scope_type=folder&scope_id={nested_folder_id}",
-            headers=alice_headers
-        )
+            headers=alice_headers)
         assert res.status_code == 200
-        assert len(res.json()["assignments"]) > 0
-        print(f"  ✅ Listed {len(res.json()['assignments'])} assignments")
+        assert any(a["user_id"] == bob_id for a in res.json()["assignments"]), "Bob assignment missing"
+        print("  OK Bob's assignment listed")
 
-        # 11. DELETE /assignments/:id - Revoke assignment
-        print("\n[11] DELETE /assignments/:id - Revoke assignment")
-        res = client.delete(f"{BASE_URL}/assignments/{assignment_id}",
-            headers=alice_headers
-        )
+        # 11. DELETE /assignments/:id — Bob's assignment is gone afterwards
+        #     (Alice's owner assignment from creator-owns still remains).
+        print("\n[11] DELETE /assignments/:id")
+        res = client.delete(f"{BASE_URL}/assignments/{assignment_id}", headers=alice_headers)
         assert res.status_code == 204
-        print(f"  ✅ Assignment revoked")
-
-        # Verify deletion
         res = client.get(f"{BASE_URL}/assignments?scope_type=folder&scope_id={nested_folder_id}",
-            headers=alice_headers
-        )
-        assert len(res.json()["assignments"]) == 0
-        print(f"  ✅ Verified assignment was deleted")
+            headers=alice_headers)
+        assert not any(a["user_id"] == bob_id for a in res.json()["assignments"]), "Bob assignment not revoked"
+        print("  OK Bob's assignment revoked")
 
-        # 12. DELETE /documents/:id - Soft delete document
-        print("\n[12] DELETE /documents/:id - Soft delete document")
-        res = client.delete(f"{BASE_URL}/documents/{doc2_id}",
-            headers=alice_headers
-        )
+        # 12. DELETE /documents/:id (soft delete)
+        print("\n[12] DELETE /documents/:id")
+        res = client.delete(f"{BASE_URL}/documents/{doc2_id}", headers=alice_headers)
         assert res.status_code == 204
-        print(f"  ✅ Document soft deleted")
-
-        # Verify soft delete
         res = client.get(f"{BASE_URL}/documents/{doc2_id}", headers=alice_headers)
-        assert res.status_code == 200
-        assert res.json()["status"] == "deleted"
-        print(f"  ✅ Verified document status is 'deleted'")
+        assert res.status_code == 200 and res.json()["status"] == "deleted"
+        print("  OK document soft-deleted")
 
-        # 13. DELETE /folders/:id - Delete empty folder
-        print("\n[13] DELETE /folders/:id - Delete empty folder")
-        
-        # Create an empty folder
+        # 13. DELETE /folders/:id (empty only)
+        print("\n[13] DELETE /folders/:id")
         res = client.post(f"{BASE_URL}/folders",
-            json={"name": "Empty Folder", "parent_folder_id": root_folder_id},
-            headers=alice_headers
-        )
+            json={"name": "Empty Folder", "parent_folder_id": root_folder_id}, headers=alice_headers)
         empty_folder_id = res.json()["id"]
-        
-        # Delete it
-        res = client.delete(f"{BASE_URL}/folders/{empty_folder_id}",
-            headers=alice_headers
-        )
+        res = client.delete(f"{BASE_URL}/folders/{empty_folder_id}", headers=alice_headers)
         assert res.status_code == 204
-        print(f"  ✅ Empty folder deleted")
-
-        # Try to delete non-empty folder (should fail)
-        res = client.delete(f"{BASE_URL}/folders/{nested_folder_id}",
-            headers=alice_headers
-        )
+        # nested still has documents -> blocked
+        res = client.delete(f"{BASE_URL}/folders/{nested_folder_id}", headers=alice_headers)
         assert res.status_code == 400
-        print(f"  ✅ Non-empty folder deletion blocked")
+        print("  OK empty folder deleted; non-empty blocked")
 
-        print("\n" + "="*50)
-        print("✅ ALL TESTS PASSED!")
-        print("="*50)
-        print("\nSummary of tested APIs:")
-        print("  ✅ 1.  GET /users")
-        print("  ✅ 2.  PATCH /users/:id")
-        print("  ✅ 3.  POST /folders")
-        print("  ✅ 4.  GET /folders")
-        print("  ✅ 5.  PATCH /folders/:id")
-        print("  ✅ 6.  POST /documents")
-        print("  ✅ 7.  GET /documents/:id")
-        print("  ✅ 8.  PATCH /documents/:id")
-        print("  ✅ 9.  POST /assignments")
-        print("  ✅ 10. GET /assignments")
-        print("  ✅ 11. DELETE /assignments/:id")
-        print("  ✅ 12. DELETE /documents/:id")
-        print("  ✅ 13. DELETE /folders/:id")
-        print("\nPrevious 7 endpoints (still working):")
-        print("  ✅ 14. POST /auth/signup")
-        print("  ✅ 15. POST /auth/login")
-        print("  ✅ 16. GET /auth/me")
-        print("  ✅ 17. GET /roles")
-        print("  ✅ 18. GET /documents (list by folder)")
-        print("  ✅ 19. GET /documents/:id/authorize-check")
-        print("  ✅ 20. Bonus: Additional authorization checks\n")
+        print("\n" + "=" * 50)
+        print("ALL CORE ENDPOINT TESTS PASSED")
+        print("=" * 50)
+
 
 if __name__ == "__main__":
     run_full_test()

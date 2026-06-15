@@ -1,16 +1,18 @@
+import uuid
+from datetime import datetime
 from pydantic import BaseModel
 from typing import Optional
 
 
 class NotificationResponse(BaseModel):
-    id: str
-    user_id: str
-    document_id: str
+    id: uuid.UUID
+    user_id: uuid.UUID
+    document_id: uuid.UUID
     type: str
     payload: dict
     delivered: bool
-    created_at: str
-    read_at: Optional[str]
+    created_at: datetime
+    read_at: Optional[datetime]
 
     class Config:
         from_attributes = True

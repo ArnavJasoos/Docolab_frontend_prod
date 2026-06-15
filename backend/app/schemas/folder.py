@@ -1,3 +1,5 @@
+import uuid
+from datetime import datetime
 from pydantic import BaseModel
 from typing import Optional
 
@@ -10,20 +12,20 @@ class FolderUpdate(BaseModel):
     parent_folder_id: Optional[str] = None
 
 class FolderResponse(BaseModel):
-    id: str
+    id: uuid.UUID
     name: str
-    parent_folder_id: Optional[str]
-    created_by: str
+    parent_folder_id: Optional[uuid.UUID]
+    created_by: uuid.UUID
 
     class Config:
         from_attributes = True
 
 class FolderTreeItem(BaseModel):
-    id: str
+    id: uuid.UUID
     name: str
-    parent_folder_id: Optional[str]
-    created_by: str
-    created_at: str
+    parent_folder_id: Optional[uuid.UUID]
+    created_by: uuid.UUID
+    created_at: datetime
 
     class Config:
         from_attributes = True

@@ -1,3 +1,5 @@
+import uuid
+from datetime import datetime
 from pydantic import BaseModel
 from typing import Optional
 
@@ -10,25 +12,25 @@ class DocumentUpdate(BaseModel):
     folder_id: Optional[str] = None
 
 class DocumentResponse(BaseModel):
-    id: str
-    folder_id: str
+    id: uuid.UUID
+    folder_id: uuid.UUID
     title: str
     status: str
     current_version_no: int
     yjs_doc_key: str
-    created_by: str
-    created_at: str
-    updated_at: str
+    created_by: uuid.UUID
+    created_at: datetime
+    updated_at: datetime
 
     class Config:
         from_attributes = True
 
 class DocumentListItem(BaseModel):
-    id: str
+    id: uuid.UUID
     title: str
     status: str
     current_version_no: int
-    created_by: str
+    created_by: uuid.UUID
 
     class Config:
         from_attributes = True
