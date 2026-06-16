@@ -4,6 +4,7 @@ import "./globals.css";
 import { Toaster } from "sonner";
 import { cn } from "@/lib/utils";
 import { TooltipProvider } from "@/components/ui/tooltip";
+import { MockProvider } from "@/mocks/mock-provider";
 
 const geist = Geist({subsets:['latin'],variable:'--font-sans'});
 
@@ -43,7 +44,9 @@ export default function RootLayout({
           rel="stylesheet"
           href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:opsz,wght,FILL,GRAD@20..48,100..700,0..1,-50..200&display=block"
         />
-        <TooltipProvider>{children}</TooltipProvider>
+        <MockProvider>
+          <TooltipProvider>{children}</TooltipProvider>
+        </MockProvider>
         <Toaster position="top-center" toastOptions={{ className: "font-ui-sm" }} />
       </body>
     </html>

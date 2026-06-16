@@ -95,9 +95,15 @@
     "@types/react-dom": "^19",
     "eslint": "^9",
     "eslint-config-next": "16.2.9",
+    "msw": "^2.14.6",
     "playwright": "^1.61.0",
     "postcss": "^8.5.15",
     "tailwindcss": "^4.3.1",
     "typescript": "^5"
+  },
+  "msw": {
+    "workerDirectory": [
+      "public"
+    ]
   }
 }
