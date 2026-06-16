@@ -1,5 +1,6 @@
 # app/main.py
 from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy import select  # async queries
 from app.core.config import settings
 from app.core.database import Base, engine, SessionLocal
@@ -13,6 +14,23 @@ from app.api import ownership
 
 app = FastAPI(title=settings.PROJECT_NAME)
 
+# ---------------------------------------------------------------------------
+# CORS middleware
+# ---------------------------------------------------------------------------
+# Browsers block a web page served from one origin (e.g. the frontend at
+# http://localhost:3000) from calling an API on a different origin (this
+# backend at http://localhost:8000) UNLESS the API explicitly allows that
+# origin. This middleware sends the Access-Control-Allow-* headers that tell
+# the browser the frontend origin is permitted (incl. preflight OPTIONS).
+# Allowed origins come from settings.CORS_ORIGINS (override via env in prod).
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=settings.cors_origins_list,
+    allow_credentials=True,            # allow cookies / Authorization header
+    allow_methods=["*"],               # GET, POST, PATCH, DELETE, OPTIONS, …
+    allow_headers=["*"],               # incl. Authorization, Content-Type
+)
+
 # Mount Routers (using flat routes under app.api)
 app.include_router(auth.router, prefix=f"{settings.API_STR}/auth", tags=["Authentication"])
 app.include_router(roles.router, prefix=f"{settings.API_STR}/roles", tags=["Roles"])
@@ -20,10 +38,17 @@ app.include_router(folders.router, prefix=f"{settings.API_STR}/folders", tags=["
 app.include_router(assignments.router, prefix=f"{settings.API_STR}/assignments", tags=["Assignments"])
 app.include_router(documents.router, prefix=f"{settings.API_STR}/documents", tags=["Documents"])
 app.include_router(users.router, prefix=f"{settings.API_STR}/users", tags=["Users"])
-app.include_router(versions.router, prefix=f"{settings.API_STR}/versions", tags=["Versioning & Approval"])
+# versions / ai / export routers carry the full resource path on each
+# decorator (e.g. /documents/{id}/versions, /documents/{id}/ai/suggest,
+# /documents/{id}/export), so they mount at the bare API prefix to produce
+# the canonical URLs from the architecture doc — NOT under a sub-prefix
+# (which would double-prefix to /api/versions/documents/{id}/versions).
+# notifications uses relative paths (""/{id}/read/read-all), so it keeps
+# its own /notifications prefix.
+app.include_router(versions.router, prefix=settings.API_STR, tags=["Versioning & Approval"])
 app.include_router(notifications.router, prefix=f"{settings.API_STR}/notifications", tags=["Notifications"])
-app.include_router(ai.router, prefix=f"{settings.API_STR}/ai", tags=["AI Suggestions"])
-app.include_router(export.router, prefix=f"{settings.API_STR}/export", tags=["Export"])
+app.include_router(ai.router, prefix=settings.API_STR, tags=["AI Suggestions"])
+app.include_router(export.router, prefix=settings.API_STR, tags=["Export"])
 
 # Person A (collaboration cluster). These routers carry the full resource path
 # on each decorator (e.g. /documents/{id}/suggestions), so they mount at the
