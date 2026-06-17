@@ -79,6 +79,11 @@ export function DocumentProvider({
       let record = await documentsApi.getDocument(docId);
       if (!record) {
         record = await documentsApi.createDocument("Untitled document");
+        // Pin the freshly created doc to the URL so a refresh reopens it
+        // instead of spawning yet another blank document.
+        if (typeof window !== "undefined") {
+          window.history.replaceState(null, "", `/editor?doc=${record.id}`);
+        }
       }
       if (cancelled) return;
       idRef.current = record.id;

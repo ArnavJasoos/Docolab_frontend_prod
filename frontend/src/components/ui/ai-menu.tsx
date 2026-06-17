@@ -5,6 +5,8 @@ import * as React from 'react';
 import {
   AIChatPlugin,
   AIPlugin,
+  acceptAISuggestions,
+  rejectAISuggestions,
   useEditorChat,
   useLastAssistantMessage,
 } from '@platejs/ai/react';
@@ -289,6 +291,16 @@ const aiChatItems = {
           .aiChat.replaceSelection(aiEditor);
       }
 
+      // Edit mode applies changes as suggestion marks (green insert / red delete).
+      // Finalize them: insertions become permanent text (un-highlighted),
+      // deletions are removed from the document.
+      if (mode === 'chat' && toolName === 'edit') {
+        acceptAISuggestions(editor);
+        editor.getApi(AIChatPlugin).aiChat.hide();
+        editor.tf.focus({ edge: 'end' });
+        return;
+      }
+
       editor.getTransforms(AIChatPlugin).aiChat.accept();
       editor.tf.focus({ edge: 'end' });
     },
@@ -335,7 +347,13 @@ Start writing a new paragraph AFTER <Document> ONLY ONE SENTENCE`
     shortcut: 'Escape',
     value: 'discard',
     onSelect: ({ editor }) => {
-      editor.getTransforms(AIPlugin).ai.undo();
+      const { mode, toolName } = editor.getOptions(AIChatPlugin);
+      // Edit mode: drop the suggestion marks (remove green inserts, restore red deletes).
+      if (mode === 'chat' && toolName === 'edit') {
+        rejectAISuggestions(editor);
+      } else {
+        editor.getTransforms(AIPlugin).ai.undo();
+      }
       editor.getApi(AIChatPlugin).aiChat.hide();
     },
   },
