@@ -10,6 +10,8 @@
 # =============================================================================
 
 import os
+from pathlib import Path
+
 from dotenv import load_dotenv
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 from sqlalchemy.orm import DeclarativeBase
@@ -18,6 +20,15 @@ from sqlalchemy.orm import DeclarativeBase
 # launched (run.py, uvicorn, tests). Idempotent — safe even though config.py
 # also calls it.
 load_dotenv()
+
+# ---------------------------------------------------------------------------
+# Load environment from backend/.env
+# ---------------------------------------------------------------------------
+# Load the .env file BEFORE reading DATABASE_URL so a local .env is picked up
+# when running the app (uvicorn). The path is resolved relative to this file
+# (backend/app/core/database.py -> backend/.env) so it works regardless of the
+# current working directory. Real environment variables still take precedence.
+load_dotenv(Path(__file__).resolve().parents[2] / ".env")
 
 # ---------------------------------------------------------------------------
 # Connection URL

@@ -23,7 +23,7 @@ async def check_permission(db: AsyncSession, user_id, doc_id, permission: str):
 @router.get("/documents/{id}/export", response_model=ExportResponse)
 async def export_document(
     id: str,
-    format: str = Query(..., regex="^(md|docx)$"),
+    format: str = Query(..., pattern="^(md|docx)$"),
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ):
@@ -56,7 +56,7 @@ async def export_document(
 @router.get("/versions/{id}/export", response_model=ExportResponse)
 async def export_version(
     id: str,
-    format: str = Query(..., regex="^(md|docx)$"),
+    format: str = Query(..., pattern="^(md|docx)$"),
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ):

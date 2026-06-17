@@ -1,0 +1,129 @@
+@import "tailwindcss";
+
+@plugin "tailwind-scrollbar-hide";
+@import "tw-animate-css";
+@config "../../tailwind.config.ts";
+
+
+@custom-variant dark (&:is(.dark *));
+
+/* shadcn / Plate UI semantic tokens -> mapped to the Docflow palette */
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-destructive: var(--destructive);
+  --color-destructive-foreground: var(--destructive-foreground);
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+  --color-sidebar: var(--sidebar);
+  --color-sidebar-foreground: var(--sidebar-foreground);
+  --color-sidebar-primary: var(--sidebar-primary);
+  --color-sidebar-primary-foreground: var(--sidebar-primary-foreground);
+  --color-sidebar-accent: var(--sidebar-accent);
+  --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
+  --color-sidebar-border: var(--sidebar-border);
+  --color-sidebar-ring: var(--sidebar-ring);
+  --color-highlight: var(--highlight);
+  --color-brand: var(--brand);
+}
+
+:root {
+  --radius: 0.5rem;
+  --background: #ffffff;
+  --foreground: #0f172a;
+  --card: #ffffff;
+  --card-foreground: #0f172a;
+  --popover: #ffffff;
+  --popover-foreground: #0f172a;
+  --primary: #3525cd;
+  --primary-foreground: #ffffff;
+  --secondary: #eae6f4;
+  --secondary-foreground: #1b1b24;
+  --muted: #f0ecf9;
+  --muted-foreground: #475569;
+  --accent: #eef2ff;
+  --accent-foreground: #4f46e5;
+  --destructive: #ef4444;
+  --destructive-foreground: #ffffff;
+  --border: #e2e8f0;
+  --input: #e2e8f0;
+  --ring: #4f46e5;
+  --sidebar: #f5f2ff;
+  --sidebar-foreground: #1b1b24;
+  --sidebar-primary: #3525cd;
+  --sidebar-primary-foreground: #ffffff;
+  --sidebar-accent: #eef2ff;
+  --sidebar-accent-foreground: #4f46e5;
+  --sidebar-border: #e2e8f0;
+  --sidebar-ring: #4f46e5;
+  --highlight: oklch(0.852 0.199 91.936);
+  --brand: #4f46e5;
+}
+
+@layer base {
+  * {
+    @apply border-border outline-ring/50;
+  }
+}
+
+.material-symbols-outlined {
+  font-family: "Material Symbols Outlined";
+  font-weight: normal;
+  font-style: normal;
+  line-height: 1;
+  letter-spacing: normal;
+  text-transform: none;
+  display: inline-block;
+  white-space: nowrap;
+  word-wrap: normal;
+  direction: ltr;
+  -webkit-font-smoothing: antialiased;
+  font-variation-settings: "FILL" 0, "wght" 400, "GRAD" 0, "opsz" 24;
+}
+.material-symbols-outlined.fill {
+  font-variation-settings: "FILL" 1, "wght" 400, "GRAD" 0, "opsz" 24;
+}
+
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background: #cbd5e1;
+  border-radius: 4px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: #94a3b8;
+}
+.hide-scrollbar::-webkit-scrollbar {
+  display: none;
+}
+.hide-scrollbar {
+  -ms-overflow-style: none;
+  scrollbar-width: none;
+}
+
+/* Plate editor: drop the default contenteditable focus ring */
+[data-slate-editor] {
+  outline: none;
+}
+
+.dark {
+  --highlight: oklch(0.852 0.199 91.936);
+}
