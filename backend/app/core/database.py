@@ -10,8 +10,14 @@
 # =============================================================================
 
 import os
+from dotenv import load_dotenv
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 from sqlalchemy.orm import DeclarativeBase
+
+# Load backend/.env so DATABASE_URL is available no matter how the app is
+# launched (run.py, uvicorn, tests). Idempotent — safe even though config.py
+# also calls it.
+load_dotenv()
 
 # ---------------------------------------------------------------------------
 # Connection URL
