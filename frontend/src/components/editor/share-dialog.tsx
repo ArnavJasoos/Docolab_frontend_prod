@@ -195,6 +195,7 @@ export function ShareDialog({
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent
         showCloseButton={false}
+        aria-describedby={undefined}
         style={{ backgroundColor: "#ffffff", width: "min(32rem, calc(100vw - 2rem))", maxWidth: "calc(100vw - 2rem)" }}
         className="flex flex-col gap-0 border border-border-subtle p-0 opacity-100 shadow-float"
       >
