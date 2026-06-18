@@ -3,8 +3,9 @@
 import * as React from "react";
 import { useEditorRef, usePluginOption } from "platejs/react";
 import { getCommentKey } from "@platejs/comment";
-import { AIChatPlugin } from "@platejs/ai/react";
+import { AIChatPlugin, acceptAISuggestions, rejectAISuggestions } from "@platejs/ai/react";
 import { toast } from "sonner";
+import { stampPendingAiEdits } from "@/lib/ai-attribution";
 
 import type { TDiscussion, DiscussionUser } from "@/lib/api/comments";
 import { discussionPlugin } from "@/components/editor/plugins/discussion-kit";
@@ -71,6 +72,10 @@ function DiscussionCard({
   onReply,
   onToggleResolved,
   onAiEdit,
+  isAiEditing,
+  aiStreamDone,
+  onAiApprove,
+  onAiReject,
 }: {
   discussion: TDiscussion;
   users: Record<string, DiscussionUser>;
@@ -78,6 +83,10 @@ function DiscussionCard({
   onReply: (id: string, text: string) => void;
   onToggleResolved: (id: string) => void;
   onAiEdit: (d: TDiscussion) => void;
+  isAiEditing: boolean;
+  aiStreamDone: boolean;
+  onAiApprove: () => void;
+  onAiReject: () => void;
 }) {
   const [draft, setDraft] = React.useState("");
 
@@ -119,6 +128,38 @@ function DiscussionCard({
         ))}
       </div>
 
+      {/* AI edit approve/reject bar */}
+      {isAiEditing && (
+        <div className="mt-3 flex items-center gap-2 rounded-lg border border-primary-container/30 bg-primary-container/5 px-3 py-2">
+          {!aiStreamDone ? (
+            <div className="flex items-center gap-2 text-text-muted">
+              <span className="inline-block size-3.5 animate-spin rounded-full border-2 border-primary-container border-t-transparent" />
+              <span className="font-ui-xs text-ui-xs font-medium">AI is editing…</span>
+            </div>
+          ) : (
+            <>
+              <span className="font-ui-xs text-ui-xs font-medium text-text-secondary">AI edit ready</span>
+              <div className="ml-auto flex gap-1.5">
+                <button
+                  onClick={onAiApprove}
+                  className="flex items-center gap-1 rounded-md bg-insertion-bg px-2.5 py-1 font-ui-xs text-ui-xs font-semibold text-insertion-text transition-colors hover:bg-insertion-bg/80"
+                >
+                  <Icon name="check" size={14} />
+                  Approve
+                </button>
+                <button
+                  onClick={onAiReject}
+                  className="flex items-center gap-1 rounded-md bg-deletion-bg px-2.5 py-1 font-ui-xs text-ui-xs font-semibold text-deletion-text transition-colors hover:bg-deletion-bg/80"
+                >
+                  <Icon name="close" size={14} />
+                  Reject
+                </button>
+              </div>
+            </>
+          )}
+        </div>
+      )}
+
       <div className="mt-3 flex items-center justify-between gap-2">
         <button
           onClick={() => onToggleResolved(discussion.id)}
@@ -132,7 +173,7 @@ function DiscussionCard({
           <Icon name={discussion.isResolved ? "refresh" : "check_circle"} size={15} />
           {discussion.isResolved ? "Reopen" : "Resolve"}
         </button>
-        {!discussion.isResolved && (
+        {!discussion.isResolved && !isAiEditing && (
           <button
             onClick={() => onAiEdit(discussion)}
             title="Apply this comment as an AI edit to the commented text"
@@ -181,6 +222,11 @@ export function CommentsPanel() {
   const users = usePluginOption(discussionPlugin, "users") as Record<string, DiscussionUser>;
   const currentUserId = usePluginOption(discussionPlugin, "currentUserId") as string;
   const [tab, setTab] = React.useState<"open" | "resolved">("open");
+  const [aiEditingId, setAiEditingId] = React.useState<string | null>(null);
+
+  // Track AI streaming status to know when the edit is done.
+  const aiChat = usePluginOption(AIChatPlugin, "chat") as { status: string };
+  const aiStreamDone = aiEditingId !== null && aiChat.status === "ready";
 
   const commit = React.useCallback(
     (next: TDiscussion[]) => {
@@ -254,19 +300,37 @@ export function CommentsPanel() {
         richText(d.comments[0]?.contentRich as RichNode[]) ||
         "Improve this text.";
       const ai = editor.getApi(AIChatPlugin).aiChat;
-      // Open the AI menu first (same as the toolbar AI button) so the streamed
-      // edit surfaces the Accept / Discard controls. Accept finalizes the
-      // suggestion marks (drops green/red) and stamps the AI attribution with
-      // the current user — see stampPendingAiEdits in ai-menu.tsx.
-      ai.show();
+      // Submit silently — no ai.show() — because we handle Approve/Reject
+      // right here in the comments panel. Opening the AI menu and then calling
+      // aiChat.hide() on approve causes the plugin to undo the accepted edits.
       void ai.submit("", {
         toolName: "edit",
         prompt: `Revise the selected text to address this reviewer comment: "${instruction}". Preserve the author's intent and only change what the comment asks for.`,
       });
+      setAiEditingId(d.id);
       toast.success("Asking AI to apply the comment…");
     },
     [editor],
   );
+
+  const handleAiApprove = React.useCallback(() => {
+    stampPendingAiEdits(editor);
+    acceptAISuggestions(editor);
+    // Do NOT call aiChat.hide() — the menu was never shown (we submit silently),
+    // and calling hide() triggers internal AI plugin cleanup that reverts the
+    // accepted suggestions. Just refocus the editor after finalizing.
+    editor.tf.focus({ edge: 'end' });
+    setAiEditingId(null);
+    toast.success("AI edit approved.");
+  }, [editor]);
+
+  const handleAiReject = React.useCallback(() => {
+    rejectAISuggestions(editor);
+    // No aiChat.hide() needed — menu was never shown.
+    editor.tf.focus();
+    setAiEditingId(null);
+    toast.info("AI edit rejected.");
+  }, [editor]);
 
   const openList = discussions.filter((d) => !d.isResolved);
   const resolvedList = discussions.filter((d) => d.isResolved);
@@ -324,6 +388,10 @@ export function CommentsPanel() {
               onReply={reply}
               onToggleResolved={toggleResolved}
               onAiEdit={aiEdit}
+              isAiEditing={aiEditingId === d.id}
+              aiStreamDone={aiEditingId === d.id && aiStreamDone}
+              onAiApprove={handleAiApprove}
+              onAiReject={handleAiReject}
             />
           ))
         )}

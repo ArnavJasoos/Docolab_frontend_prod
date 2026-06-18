@@ -119,6 +119,12 @@ const BlockCommentContent = ({ children, element }: PlateElementProps) => {
       // PopoverTrigger): anchor the popover to the block being commented on so
       // it appears at the selection instead of the top-left corner.
       if (isCommenting && commentingCurrent) {
+        // Prefer the draft comment node (highlighted text span) so the
+        // popover anchors right beside the selected text instead of
+        // the entire block element.
+        if (draftCommentNode) {
+          return editor.api.toDOMNode(draftCommentNode[0]) ?? editor.api.toDOMNode(element) ?? null;
+        }
         return editor.api.toDOMNode(element) ?? null;
       }
       return null;
@@ -172,8 +178,10 @@ const BlockCommentContent = ({ children, element }: PlateElementProps) => {
           className="max-h-[min(50dvh,calc(-24px+var(--radix-popper-available-height)))] w-[380px] min-w-[130px] max-w-[calc(100vw-24px)] overflow-y-auto p-0 data-[state=closed]:opacity-0"
           onCloseAutoFocus={(e) => e.preventDefault()}
           onOpenAutoFocus={(e) => e.preventDefault()}
-          align="center"
-          side="bottom"
+          align="start"
+          side="right"
+          sideOffset={16}
+          collisionPadding={16}
         >
           {isCommenting ? (
             <CommentCreateForm className="p-4" focusOnMount />
