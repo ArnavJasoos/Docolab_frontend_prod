@@ -2,16 +2,30 @@
 
 import * as React from "react";
 import Link from "next/link";
+import dynamic from "next/dynamic";
 
 import { Icon } from "@/components/icon";
 import { DocMenubar } from "@/components/editor/doc-menubar";
 import { DocTitle, SaveStatus } from "@/components/editor/doc-title";
 import { PresenceStack } from "@/components/editor/presence-stack";
 import { DocOverflowMenu } from "@/components/editor/doc-overflow-menu";
-import { ShareDialog } from "@/components/editor/share-dialog";
-import { VersionHistoryDialog } from "@/components/editor/version-history-dialog";
 import { cn } from "@/lib/utils";
 import { useDocument } from "@/lib/store/document-store";
+
+// Dialogs are loaded on first open instead of shipping in the editor's initial
+// chunk (version history pulls the version API + diff UI; share pulls the
+// collaborator/permission UI).
+const ShareDialog = dynamic(
+  () => import("@/components/editor/share-dialog").then((m) => m.ShareDialog),
+  { ssr: false },
+);
+const VersionHistoryDialog = dynamic(
+  () =>
+    import("@/components/editor/version-history-dialog").then(
+      (m) => m.VersionHistoryDialog,
+    ),
+  { ssr: false },
+);
 
 export function EditorTopBar() {
   const {
@@ -100,17 +114,21 @@ export function EditorTopBar() {
         <DocOverflowMenu />
       </div>
 
-      <ShareDialog
-        docId={docId}
-        docTitle={title}
-        open={shareOpen}
-        onOpenChange={setShareOpen}
-      />
-      <VersionHistoryDialog
-        docId={docId}
-        open={versionsOpen}
-        onOpenChange={setVersionsOpen}
-      />
+      {shareOpen && (
+        <ShareDialog
+          docId={docId}
+          docTitle={title}
+          open={shareOpen}
+          onOpenChange={setShareOpen}
+        />
+      )}
+      {versionsOpen && (
+        <VersionHistoryDialog
+          docId={docId}
+          open={versionsOpen}
+          onOpenChange={setVersionsOpen}
+        />
+      )}
     </header>
   );
 }

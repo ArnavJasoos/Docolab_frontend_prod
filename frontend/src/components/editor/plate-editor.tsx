@@ -1,14 +1,22 @@
 "use client";
 
 import * as React from "react";
+import dynamic from "next/dynamic";
 import { Plate, usePlateEditor } from "platejs/react";
 
 import type { DocumentRecord } from "@/lib/types";
 import { EditorKit } from "@/components/editor/editor-kit";
 import { Editor, EditorContainer } from "@/components/ui/editor";
 import { EditorTopBar } from "@/components/editor/editor-top-bar";
-import { CommentsPanel } from "@/components/editor/comments-panel";
 import { discussionPlugin } from "@/components/editor/plugins/discussion-kit";
+
+// The comments panel is only mounted when the user opens it, so keep it out of
+// the initial editor chunk and load it on demand.
+const CommentsPanel = dynamic(
+  () =>
+    import("@/components/editor/comments-panel").then((m) => m.CommentsPanel),
+  { ssr: false },
+);
 import { DocumentProvider, useDocument } from "@/lib/store/document-store";
 import { getDiscussions } from "@/lib/api/comments";
 

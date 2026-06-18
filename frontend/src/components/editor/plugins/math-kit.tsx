@@ -1,12 +1,24 @@
 'use client';
 
+import dynamic from 'next/dynamic';
+
 import { MathRules } from '@platejs/math';
 import { EquationPlugin, InlineEquationPlugin } from '@platejs/math/react';
 
-import {
-  EquationElement,
-  InlineEquationElement,
-} from '@/components/ui/equation-node';
+// KaTeX rendering lives in the equation node components. Keep the plugins
+// registered for parsing/input rules, but load the renderer on demand so KaTeX
+// is only pulled in when a document contains an equation.
+const EquationElement = dynamic(
+  () => import('@/components/ui/equation-node').then((m) => m.EquationElement),
+  { ssr: false },
+);
+const InlineEquationElement = dynamic(
+  () =>
+    import('@/components/ui/equation-node').then(
+      (m) => m.InlineEquationElement,
+    ),
+  { ssr: false },
+);
 
 export const MathKit = [
   InlineEquationPlugin.configure({
