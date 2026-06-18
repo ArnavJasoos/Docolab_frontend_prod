@@ -38,27 +38,41 @@ function Workspace() {
   return <LoadedWorkspace key={doc.id} doc={doc} />;
 }
 
+// Real-time collaboration (Yjs + Hocuspocus) requires the collab WebSocket
+// server to be running. That sync layer isn't deployed yet, so collaboration is
+// opt-in via env — when off (the default) the editor initializes locally from
+// the REST content and works standalone. Set NEXT_PUBLIC_COLLAB_ENABLED="true"
+// (and NEXT_PUBLIC_COLLAB_URL) once the Hocuspocus server is available.
+const COLLAB_ENABLED = process.env.NEXT_PUBLIC_COLLAB_ENABLED === "true";
+
 function LoadedWorkspace({ doc }: { doc: DocumentRecord }) {
   const token = getToken() ?? "";
   // The editor is re-mounted per doc.id (key in <Workspace>), so building the
   // plugin list once on mount is correct — docId/token never change in-place.
   const editor = usePlateEditor({
-    // Yjs owns initialization: skip Plate's normal value seeding and init the
-    // shared doc manually in the effect below (Plate Yjs requirement).
-    skipInitialization: true,
+    // With collab on, Yjs owns initialization (skip Plate's value seeding and
+    // init the shared doc in the effect below). With collab off, seed normally
+    // from the REST content so the editor works without the WebSocket server.
+    skipInitialization: COLLAB_ENABLED,
+    value: COLLAB_ENABLED ? undefined : doc.content,
     plugins: React.useMemo(
-      () => [...EditorKit, createYjsPlugin(doc.id, token)],
+      () =>
+        COLLAB_ENABLED
+          ? [...EditorKit, createYjsPlugin(doc.id, token)]
+          : EditorKit,
       // eslint-disable-next-line react-hooks/exhaustive-deps
       [],
     ),
   });
-  const { docId, readOnly, commentsOpen, saveNow } = useDocument();
+  const { docId, readOnly, commentsOpen, saveNow, onContentChange } =
+    useDocument();
 
   // Connect to Hocuspocus and seed the shared Y.Doc. On the very first connect
   // for a document (yjs_state is NULL server-side) the shared doc is empty, so
   // we seed it from the REST `content` we already loaded. Once content lives in
   // Yjs, that seed is ignored (init only seeds when the shared doc is empty).
   React.useEffect(() => {
+    if (!COLLAB_ENABLED) return;
     void editor.getApi(YjsPlugin).yjs.init({
       id: doc.id,
       value: doc.content,
@@ -83,7 +97,14 @@ function LoadedWorkspace({ doc }: { doc: DocumentRecord }) {
   }, [saveNow]);
 
   return (
-    <Plate editor={editor}>
+    <Plate
+      editor={editor}
+      // With collab off, propagate content edits to the store so autosave
+      // persists them. With collab on, Yjs owns content, so skip this.
+      onChange={
+        COLLAB_ENABLED ? undefined : ({ value }) => onContentChange(value)
+      }
+    >
       <div className="flex h-screen flex-col overflow-hidden">
         <EditorTopBar />
         <div className="flex min-h-0 flex-1">
