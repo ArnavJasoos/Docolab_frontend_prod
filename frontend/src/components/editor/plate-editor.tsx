@@ -2,6 +2,7 @@
 
 import * as React from "react";
 import { Plate, usePlateEditor } from "platejs/react";
+import { YjsPlugin } from "@platejs/yjs/react";
 
 import type { DocumentRecord } from "@/lib/types";
 import { EditorKit } from "@/components/editor/editor-kit";
@@ -31,11 +32,36 @@ function Workspace() {
 }
 
 function LoadedWorkspace({ doc }: { doc: DocumentRecord }) {
-  const token = getToken() ?? '';
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  const plugins = React.useMemo(() => [...EditorKit, createYjsPlugin(doc.id, token)], [doc.id]);
-  const editor = usePlateEditor({ plugins });
+  const token = getToken() ?? "";
+  // The editor is re-mounted per doc.id (key in <Workspace>), so building the
+  // plugin list once on mount is correct — docId/token never change in-place.
+  const editor = usePlateEditor({
+    // Yjs owns initialization: skip Plate's normal value seeding and init the
+    // shared doc manually in the effect below (Plate Yjs requirement).
+    skipInitialization: true,
+    plugins: React.useMemo(
+      () => [...EditorKit, createYjsPlugin(doc.id, token)],
+      // eslint-disable-next-line react-hooks/exhaustive-deps
+      [],
+    ),
+  });
   const { docId, readOnly, commentsOpen, saveNow } = useDocument();
+
+  // Connect to Hocuspocus and seed the shared Y.Doc. On the very first connect
+  // for a document (yjs_state is NULL server-side) the shared doc is empty, so
+  // we seed it from the REST `content` we already loaded. Once content lives in
+  // Yjs, that seed is ignored (init only seeds when the shared doc is empty).
+  React.useEffect(() => {
+    void editor.getApi(YjsPlugin).yjs.init({
+      id: doc.id,
+      value: doc.content,
+      autoConnect: true,
+    });
+    return () => {
+      editor.getApi(YjsPlugin).yjs.destroy();
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   // Hydrate this document's comment threads into the discussion plugin.
   React.useEffect(() => {

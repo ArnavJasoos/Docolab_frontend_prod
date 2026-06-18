@@ -12,26 +12,25 @@ const SECRET = 'test-secret-for-unit-tests';
 // verifyToken logic (mirrors auth.js without DB)
 // ─────────────────────────────────────────────────────────────────────────────
 
+// Mirrors auth.js::verifyToken — the FastAPI token carries ONLY { sub, exp }.
 function verifyTokenSync(token, secret) {
   try {
     const payload = jwt.verify(token, secret, { algorithms: ['HS256'] });
-    return { id: payload.sub, email: payload.email ?? payload.sub, org_id: payload.org_id };
+    if (!payload.sub) return null;
+    return { id: payload.sub };
   } catch {
     return null;
   }
 }
 
 describe('verifyToken', () => {
-  test('returns user payload for a valid HS256 token', () => {
-    const token = jwt.sign(
-      { sub: 'user-abc', email: 'alice@example.com', org_id: 'org-1' },
-      SECRET,
-      { algorithm: 'HS256', expiresIn: '1h' }
-    );
+  test('returns { id } from the sub claim for a valid HS256 token', () => {
+    const token = jwt.sign({ sub: 'user-abc' }, SECRET, {
+      algorithm: 'HS256',
+      expiresIn: '1h',
+    });
     const result = verifyTokenSync(token, SECRET);
-    assert.equal(result?.id, 'user-abc');
-    assert.equal(result?.email, 'alice@example.com');
-    assert.equal(result?.org_id, 'org-1');
+    assert.deepEqual(result, { id: 'user-abc' });
   });
 
   test('returns null for an expired token', () => {
@@ -51,41 +50,93 @@ describe('verifyToken', () => {
     assert.equal(result, null);
   });
 
-  test('falls back email to sub when email claim is absent', () => {
-    const token = jwt.sign({ sub: 'user-xyz', org_id: 'org-2' }, SECRET, {
+  test('returns null when the sub claim is missing', () => {
+    const token = jwt.sign({ foo: 'bar' }, SECRET, {
       algorithm: 'HS256',
       expiresIn: '1h',
     });
     const result = verifyTokenSync(token, SECRET);
-    assert.equal(result?.email, 'user-xyz');
+    assert.equal(result, null);
+  });
+
+  test('ignores a token signed with a non-HS256 algorithm (alg confusion)', () => {
+    const token = jwt.sign({ sub: 'user-abc' }, SECRET, { algorithm: 'HS512' });
+    const result = verifyTokenSync(token, SECRET);
+    assert.equal(result, null);
   });
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
-// getUserRole fallback (mirrors auth.js role resolution logic)
+// getUserRole hierarchy walk (mirrors auth_service.py::authorize):
+//   document → its folder → parent folders, first assignment wins, else viewer.
+// We model the DB as a sequence of scopes; the walker returns the first hit.
 // ─────────────────────────────────────────────────────────────────────────────
 
-function resolveRole(docRows, folderRows) {
-  if (docRows.length > 0) return docRows[0].name;
-  if (folderRows.length > 0) return folderRows[0].name;
+// rowsByScope: Map "<scopeType>:<scopeId>" → role name (an assignment)
+// parents: Map "folder:<id>" → parentFolderId | null ; docFolder: doc → folderId
+function walkRole(documentId, { assignment, docFolder, folderParent }) {
+  let scopeType = 'document';
+  let scopeId = documentId;
+  for (let depth = 0; depth < 64 && scopeId; depth++) {
+    const hit = assignment.get(`${scopeType}:${scopeId}`);
+    if (hit) return hit;
+    if (scopeType === 'document') {
+      if (!docFolder.has(scopeId)) break;
+      scopeType = 'folder';
+      scopeId = docFolder.get(scopeId);
+    } else {
+      const parent = folderParent.get(scopeId);
+      if (!parent) break;
+      scopeId = parent;
+    }
+  }
   return 'viewer';
 }
 
-describe('getUserRole fallback logic', () => {
-  test('uses document-scoped role when present', () => {
-    assert.equal(resolveRole([{ name: 'editor' }], []), 'editor');
+describe('getUserRole hierarchy walk', () => {
+  const docFolder = new Map([['doc1', 'fA']]);          // doc1 lives in folder fA
+  const folderParent = new Map([['fA', 'fRoot'], ['fRoot', null]]); // fA → fRoot → root
+
+  test('document-scoped assignment wins', () => {
+    const assignment = new Map([['document:doc1', 'editor']]);
+    assert.equal(walkRole('doc1', { assignment, docFolder, folderParent }), 'editor');
   });
 
-  test('falls back to folder-scoped role when no document assignment', () => {
-    assert.equal(resolveRole([], [{ name: 'commenter' }]), 'commenter');
+  test('falls back to the immediate folder assignment', () => {
+    const assignment = new Map([['folder:fA', 'suggester']]);
+    assert.equal(walkRole('doc1', { assignment, docFolder, folderParent }), 'suggester');
   });
 
-  test('defaults to viewer when no assignment exists', () => {
-    assert.equal(resolveRole([], []), 'viewer');
+  test('inherits a parent-folder assignment when nearer scopes are empty', () => {
+    const assignment = new Map([['folder:fRoot', 'owner']]);
+    assert.equal(walkRole('doc1', { assignment, docFolder, folderParent }), 'owner');
   });
 
   test('document scope takes precedence over folder scope', () => {
-    assert.equal(resolveRole([{ name: 'admin' }], [{ name: 'viewer' }]), 'admin');
+    const assignment = new Map([
+      ['document:doc1', 'viewer'],
+      ['folder:fA', 'owner'],
+    ]);
+    assert.equal(walkRole('doc1', { assignment, docFolder, folderParent }), 'viewer');
+  });
+
+  test('nearer folder takes precedence over parent folder', () => {
+    const assignment = new Map([
+      ['folder:fA', 'editor'],
+      ['folder:fRoot', 'owner'],
+    ]);
+    assert.equal(walkRole('doc1', { assignment, docFolder, folderParent }), 'editor');
+  });
+
+  test('defaults to viewer when no assignment exists anywhere', () => {
+    assert.equal(walkRole('doc1', { assignment: new Map(), docFolder, folderParent }), 'viewer');
+  });
+
+  test('defaults to viewer when the document is not found', () => {
+    assert.equal(
+      walkRole('ghost', { assignment: new Map(), docFolder, folderParent }),
+      'viewer'
+    );
   });
 });
 
@@ -126,6 +177,7 @@ describe('storage type conversion', () => {
 // READ_ONLY_ROLES guard
 // ─────────────────────────────────────────────────────────────────────────────
 
+// Real role set (roles table): owner / approver / editor / suggester / viewer.
 describe('READ_ONLY_ROLES', () => {
   const READ_ONLY_ROLES = new Set(['viewer']);
 
@@ -133,15 +185,14 @@ describe('READ_ONLY_ROLES', () => {
     assert.ok(READ_ONLY_ROLES.has('viewer'));
   });
 
-  test('editor is not read-only', () => {
-    assert.ok(!READ_ONLY_ROLES.has('editor'));
-  });
+  for (const role of ['owner', 'approver', 'editor', 'suggester']) {
+    test(`${role} can push edits (not read-only)`, () => {
+      assert.ok(!READ_ONLY_ROLES.has(role));
+    });
+  }
 
-  test('admin is not read-only', () => {
-    assert.ok(!READ_ONLY_ROLES.has('admin'));
-  });
-
-  test('commenter is not read-only', () => {
-    assert.ok(!READ_ONLY_ROLES.has('commenter'));
+  test('an unknown role defaults to editable only if explicitly absent', () => {
+    // getUserRole never returns unknown names, but guard the set semantics.
+    assert.ok(!READ_ONLY_ROLES.has('totally-unknown'));
   });
 });

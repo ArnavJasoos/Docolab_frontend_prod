@@ -107,9 +107,11 @@ export function DocumentProvider({
     }
     setSaveStatus("saving");
     try {
+      // Content is owned by Yjs/Hocuspocus now — autosave only persists the
+      // governance/metadata fields over REST. Sending `content` here would let
+      // a metadata save clobber the live collaborative document.
       await documentsApi.updateDocument(idRef.current, {
         title: titleRef.current,
-        content: contentRef.current ?? undefined,
         status: statusRef.current,
       });
       setSaveStatus("saved");
