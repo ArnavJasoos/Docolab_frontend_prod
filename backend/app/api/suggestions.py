@@ -32,6 +32,7 @@ from app.schemas.suggestion import (
     SuggestionResolveRequest, SuggestionResolveResponse,
 )
 from app.services.auth_service import authorize
+from app.services.audit_service import record_audit, AuditAction
 
 router = APIRouter()
 
@@ -109,6 +110,13 @@ async def create_suggestion(
         reason=data.reason,
     )
     db.add(suggestion)
+    await db.flush()
+    record_audit(
+        db, org_id=current_user.org_id, actor_id=current_user.id,
+        action=AuditAction.SUGGESTION_CREATE, target_type="suggestion",
+        target_id=suggestion.id, document_id=doc.id,
+        meta={"origin": suggestion.origin, "type": suggestion.type},
+    )
     await db.commit()
     await db.refresh(suggestion)
     return suggestion
@@ -166,6 +174,12 @@ async def accept_suggestion(
     )
     db.add(attribution)
 
+    record_audit(
+        db, org_id=current_user.org_id, actor_id=current_user.id,
+        action=AuditAction.RESOLVE_SUGGESTION, target_type="suggestion",
+        target_id=suggestion.id, document_id=suggestion.document_id,
+        meta={"decision": "approved"},
+    )
     await db.commit()
     return {
         "success": True,
@@ -200,6 +214,12 @@ async def reject_suggestion(
     if data.reason is not None:
         suggestion.reason = data.reason
 
+    record_audit(
+        db, org_id=current_user.org_id, actor_id=current_user.id,
+        action=AuditAction.REJECT_SUGGESTION, target_type="suggestion",
+        target_id=suggestion.id, document_id=suggestion.document_id,
+        meta={"decision": "rejected", "reason": data.reason},
+    )
     await db.commit()
     return {
         "success": True,

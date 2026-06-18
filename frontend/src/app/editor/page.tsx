@@ -6,5 +6,7 @@ export default async function EditorPage({
   searchParams: Promise<{ doc?: string }>;
 }) {
   const { doc } = await searchParams;
-  return <PlateEditor docId={doc ?? "project-nexus"} />;
+  // No ?doc= → create a fresh blank document (handled in the store) instead of
+  // falling back to an existing seeded doc.
+  return <PlateEditor docId={doc ?? "new"} />;
 }

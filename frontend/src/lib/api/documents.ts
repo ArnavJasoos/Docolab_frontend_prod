@@ -7,9 +7,32 @@ import type {
   SortKey,
 } from "@/lib/types";
 import { latency, read, uid, write } from "@/lib/api/db";
-import { CURRENT_USER, SEED_DOCS, genericContent } from "@/lib/api/seed";
+import { CURRENT_USER, SEED_DOCS } from "@/lib/api/seed";
+import { apiFetch } from "@/lib/api/client";
 
 const KEY = "docs";
+
+/** A genuinely blank document body — a single empty paragraph. */
+function blankContent(): Value {
+  return [{ type: "p", children: [{ text: "" }] }];
+}
+
+/**
+ * Best-effort backend exposure of a new document.
+ * Maps to POST /documents (FastAPI). Non-blocking: the localStorage record is
+ * the source of truth in this mock layer, so a 401 (no auth) or offline backend
+ * never blocks creation. Swap localStorage for this response once auth is wired.
+ */
+async function createDocumentRemote(doc: DocumentRecord): Promise<void> {
+  try {
+    await apiFetch("/documents", {
+      method: "POST",
+      body: JSON.stringify({ title: doc.title, folder_id: null }),
+    });
+  } catch {
+    /* backend not reachable / unauthenticated — stay local-only for now */
+  }
+}
 
 function loadAll(): DocumentRecord[] {
   const existing = read<DocumentRecord[] | null>(KEY, null);
@@ -98,9 +121,11 @@ export async function createDocument(title = "Untitled document"): Promise<Docum
     starred: false,
     trashed: false,
     collaboratorCount: 1,
-    content: genericContent(title),
+    content: blankContent(),
   };
   persistAll([doc, ...docs]);
+  // Expose the creation to the backend (best-effort; see note above).
+  void createDocumentRemote(doc);
   return doc;
 }
 

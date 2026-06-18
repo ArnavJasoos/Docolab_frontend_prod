@@ -11,6 +11,7 @@ from app.schemas.auth import (
     RefreshRequest, RefreshResponse, LogoutRequest, LogoutResponse,
 )
 from app.api.deps import get_current_user
+from app.services.audit_service import record_audit, AuditAction
 
 router = APIRouter()
 
@@ -35,6 +36,12 @@ async def signup(data: UserCreate, db: AsyncSession = Depends(get_db)):
         status="active",
     )
     db.add(user)
+    await db.flush()
+    record_audit(
+        db, org_id=user.org_id, actor_id=user.id,
+        action=AuditAction.USER_SIGNUP, target_type="user", target_id=user.id,
+        meta={"email": user.email},
+    )
     await db.commit()
     await db.refresh(user)
 

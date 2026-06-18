@@ -75,8 +75,11 @@ export function DocOverflowMenu() {
               <DropdownMenuItem onSelect={a.exportMarkdown}>
                 <Row icon="description">Markdown (.md)</Row>
               </DropdownMenuItem>
+              <DropdownMenuItem onSelect={() => void a.exportPdf()}>
+                <Row icon="picture_as_pdf">PDF (.pdf)</Row>
+              </DropdownMenuItem>
               <DropdownMenuItem onSelect={a.print}>
-                <Row icon="picture_as_pdf">Print / Save as PDF</Row>
+                <Row icon="print">Print…</Row>
               </DropdownMenuItem>
             </DropdownMenuSubContent>
           </DropdownMenuSub>

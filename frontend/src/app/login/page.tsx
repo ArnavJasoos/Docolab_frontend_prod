@@ -1,0 +1,287 @@
+"use client";
+
+import * as React from "react";
+import Link from "next/link";
+import { useRouter } from "next/navigation";
+import { toast } from "sonner";
+
+import { Icon } from "@/components/icon";
+import { cn } from "@/lib/utils";
+import * as auth from "@/lib/api/auth";
+
+const COLLAB = [
+  "https://lh3.googleusercontent.com/aida-public/AB6AXuB9c8Dnb41BFaG7-URjI0k1ruWOhfTLERPCEG37GgAKwIEp2O5uCws1DBtgSqTJE1x_mCftconp3GTGQxXZ3wVHGa2UagBwnMvzamlMDV2VucqhAtq3Hga-4ABoJ7_AY4wilaGcFMg9HZcMWLyuSIyk4K_Rr_Vsywf00D0cKR1VdKHErJNckhOT6EAdWtoheLVC4_Tasa5k4Zd70zmxXuP1T2sJtk7bw5VnvH_FcjTkgCsaoD86vUlpPX6AThots8DX6LNGGxqkt7E",
+  "https://lh3.googleusercontent.com/aida-public/AB6AXuBy7ebB__k-oF1b7_AVXEI3hkOlz1mI5w1Jt99aHJl3dGZ3zOhRAa-_VGrktex5TnGQOIwSG2sjLRZ67fV5sTl31lOPHeEIRClUVoZL1ZUNtHtP8AuxOatexObwwMNkxuDCZSC06LN2RXbAYCw1u4L4SF23eFvZJ_HfHwWlwsU4HzlBKYH8CxkhipWkqsfuYSJqs7C0OVidbt_BowrLcQ3XmPEoePf4B01RVZi4n94wMFNbbkKa1snwTj3iQ7d2jtQIqTjU2TKy258",
+  "https://lh3.googleusercontent.com/aida-public/AB6AXuDHD_tsGJVYieCkRxwIIsD_sYbLy9K7FJAr6iNphkrEe8hwgCaxjAVXEi2oRNqFAdM6eivfORX3KqWlS-6PBTQAMEqc0c7oNC6w66F9KlPl9XDO2mUOExiwz9pMFxqDrLMVudPGKtcUV8PzNz8Bbwv6yiGK67AZioYx8oNgxP_c_VgljPmn7i7c2Fs-Zl_AuSZ3hJPXlQCEZn63ik_5SfDCn8ql5AYsZ60n7FJKWo9A_PffvUpoKnh15LFm_HGRud75kmewNs7AwM4",
+  "https://lh3.googleusercontent.com/aida-public/AB6AXuBLRE34aKi6rce1pgfcS35UeH1gGGdOksXN3xlXGNpFO3P7DDoN_M0WfTTD06FOwmRRqsPWIjgn9h5jy1NjwzOmZYRvrHgb0qPl5XDX6-R1vyLhaeU0Lc-qUf4CXJIbYR19V9KTXNzI_yeoXaYdB8ADDk1f6_elXaofK2He71YV77oi4CuQpcRKiNmS5qoVnxInSvorAU_2De5HnHSVgO2CxOsUS4XSj20xb3Lce4YowIRZDVR4pDgpBo2ZS4LM0bTqNUBzDhS2pTs",
+];
+
+export default function LoginPage() {
+  const router = useRouter();
+  const [username, setUsername] = React.useState("");
+  const [password, setPassword] = React.useState("");
+  const [showPassword, setShowPassword] = React.useState(false);
+  const [remember, setRemember] = React.useState(false);
+  const [loading, setLoading] = React.useState<null | "form" | "google" | "sso">(null);
+  const [error, setError] = React.useState<string | null>(null);
+
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setError(null);
+    if (!username.trim()) return setError("Please enter your username.");
+    if (!password) return setError("Please enter your password.");
+
+    setLoading("form");
+    try {
+      const user = await auth.login({ username, password });
+      toast.success(`Welcome back, ${user.name.split(" ")[0]}`);
+      router.push("/browser");
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Couldn't sign you in.");
+    } finally {
+      setLoading(null);
+    }
+  };
+
+  const withProvider = async (provider: "google" | "sso") => {
+    setError(null);
+    setLoading(provider);
+    try {
+      await auth.signInWithProvider(provider);
+      router.push("/browser");
+    } catch {
+      setError("Couldn't sign in with that provider.");
+      setLoading(null);
+    }
+  };
+
+  return (
+    <div className="flex h-full w-full overflow-hidden bg-app-bg text-on-surface">
+      {/* Left: branding */}
+      <div className="relative hidden w-1/2 flex-col justify-center overflow-hidden border-r border-border-subtle bg-[#ECEEF2] p-xxl lg:flex">
+        <div className="relative z-10 w-full max-w-[420px]">
+          <div className="mb-xxl flex items-center gap-sm">
+            <div className="flex size-8 items-center justify-center rounded bg-primary">
+              <Icon name="description" fill className="text-[20px] text-on-primary" />
+            </div>
+            <span className="font-display-sm text-display-sm font-bold tracking-tight text-primary">
+              Docflow
+            </span>
+          </div>
+          <h1 className="mb-xl font-display-lg text-display-lg text-text-primary">
+            Documents that move at your team&apos;s speed.
+          </h1>
+          <p className="mb-xxl font-ui-lg text-ui-lg text-text-secondary">
+            Secure, collaborative workspaces designed for high-performance teams
+            to ideate, review, and finalize without friction.
+          </p>
+          <div className="flex flex-col gap-md border-t border-border-strong pt-lg">
+            <p className="font-ui-sm text-ui-sm uppercase tracking-wider text-text-secondary">
+              Trusted by top teams
+            </p>
+            <div className="flex -space-x-4">
+              {COLLAB.map((src, i) => (
+                // eslint-disable-next-line @next/next/no-img-element
+                <img
+                  key={i}
+                  alt="Collaborator"
+                  className="size-10 rounded-full border-2 border-[#ECEEF2] bg-surface-bright object-cover"
+                  src={src}
+                />
+              ))}
+              <div className="flex size-10 items-center justify-center rounded-full border-2 border-[#ECEEF2] bg-surface-container font-ui-sm text-ui-sm text-text-secondary">
+                +8k
+              </div>
+            </div>
+          </div>
+        </div>
+        <div
+          className="pointer-events-none absolute inset-0 opacity-10"
+          style={{
+            backgroundImage:
+              "radial-gradient(circle at 2px 2px, #CBD5E1 1px, transparent 0)",
+            backgroundSize: "24px 24px",
+          }}
+        />
+      </div>
+
+      {/* Right: form */}
+      <div className="flex flex-1 flex-col items-center justify-center overflow-y-auto bg-document-surface px-lg py-xl">
+        <div className="mb-xl flex items-center gap-sm lg:hidden">
+          <div className="flex size-8 items-center justify-center rounded bg-primary">
+            <Icon name="description" fill className="text-[20px] text-on-primary" />
+          </div>
+          <span className="font-display-sm text-display-sm font-bold tracking-tight text-primary">
+            Docflow
+          </span>
+        </div>
+        <div className="w-full max-w-[400px]">
+          <div className="mb-lg text-center lg:text-left">
+            <h2 className="mb-xs font-ui-xl text-ui-xl text-text-primary">
+              Sign in to your account
+            </h2>
+            <p className="font-ui-base text-ui-base text-text-secondary">
+              Welcome back. Please enter your details.
+            </p>
+          </div>
+
+          {error && (
+            <div className="mb-lg flex items-center gap-2 rounded-lg border border-status-destructive/30 bg-deletion-bg px-3 py-2 font-ui-sm text-ui-sm text-deletion-text">
+              <Icon name="error" size={18} />
+              {error}
+            </div>
+          )}
+
+          <form className="space-y-lg" onSubmit={handleSubmit} noValidate>
+            <div>
+              <label
+                className="mb-xs block font-ui-sm text-ui-sm font-medium text-text-primary"
+                htmlFor="username"
+              >
+                Username
+              </label>
+              <div className="relative">
+                <div className="pointer-events-none absolute inset-y-0 left-0 flex items-center pl-3">
+                  <Icon name="person" className="text-[20px] text-text-muted" />
+                </div>
+                <input
+                  className="block h-[44px] w-full rounded-lg border border-border-subtle bg-document-surface pl-10 pr-3 font-ui-base text-ui-base text-text-primary transition-shadow placeholder:text-text-muted focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary"
+                  id="username"
+                  name="username"
+                  placeholder="admin"
+                  type="text"
+                  autoComplete="username"
+                  value={username}
+                  onChange={(e) => setUsername(e.target.value)}
+                />
+              </div>
+            </div>
+
+            <div>
+              <label
+                className="mb-xs block font-ui-sm text-ui-sm font-medium text-text-primary"
+                htmlFor="password"
+              >
+                Password
+              </label>
+              <div className="relative">
+                <div className="pointer-events-none absolute inset-y-0 left-0 flex items-center pl-3">
+                  <Icon name="lock" className="text-[20px] text-text-muted" />
+                </div>
+                <input
+                  className="block h-[44px] w-full rounded-lg border border-border-subtle bg-document-surface pl-10 pr-10 font-ui-base text-ui-base text-text-primary transition-shadow placeholder:text-text-muted focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary"
+                  id="password"
+                  name="password"
+                  placeholder="••••••••"
+                  type={showPassword ? "text" : "password"}
+                  autoComplete="current-password"
+                  value={password}
+                  onChange={(e) => setPassword(e.target.value)}
+                />
+                <button
+                  type="button"
+                  onClick={() => setShowPassword((v) => !v)}
+                  aria-label={showPassword ? "Hide password" : "Show password"}
+                  className="absolute inset-y-0 right-0 flex items-center pr-3 text-text-muted transition-colors hover:text-text-primary focus:outline-none"
+                >
+                  <Icon name={showPassword ? "visibility" : "visibility_off"} className="text-[20px]" />
+                </button>
+              </div>
+            </div>
+
+            <div className="flex items-center justify-between">
+              <label className="flex cursor-pointer items-center gap-2 font-ui-sm text-ui-sm text-text-secondary">
+                <input
+                  className="size-4 rounded border-border-subtle text-primary focus:ring-primary"
+                  type="checkbox"
+                  checked={remember}
+                  onChange={(e) => setRemember(e.target.checked)}
+                />
+                Remember for 30 days
+              </label>
+              <a
+                href="#"
+                className="font-ui-sm text-ui-sm font-semibold text-primary transition-colors hover:text-accent-hover"
+              >
+                Forgot password?
+              </a>
+            </div>
+
+            <button
+              type="submit"
+              disabled={loading !== null}
+              className="flex h-[44px] w-full items-center justify-center rounded-lg border border-transparent bg-primary-container px-4 font-ui-base text-ui-base font-semibold text-on-primary shadow-sm transition-colors hover:bg-accent-hover focus:outline-none focus:ring-2 focus:ring-primary focus:ring-offset-2 disabled:opacity-70"
+            >
+              {loading === "form" ? "Signing in…" : "Sign In"}
+            </button>
+          </form>
+
+          <div className="relative mt-lg">
+            <div className="absolute inset-0 flex items-center">
+              <div className="w-full border-t border-border-subtle" />
+            </div>
+            <div className="relative flex justify-center text-ui-sm">
+              <span className="bg-document-surface px-sm text-text-muted">Or continue with</span>
+            </div>
+          </div>
+
+          <div className="mt-lg grid grid-cols-2 gap-sm">
+            <ProviderButton
+              icon="g_mobiledata"
+              label="Google"
+              loading={loading === "google"}
+              disabled={loading !== null}
+              onClick={() => void withProvider("google")}
+            />
+            <ProviderButton
+              icon="business_center"
+              label="SSO"
+              loading={loading === "sso"}
+              disabled={loading !== null}
+              onClick={() => void withProvider("sso")}
+            />
+          </div>
+
+          <p className="mt-xl text-center font-ui-sm text-ui-sm text-text-secondary">
+            Don&apos;t have an account?{" "}
+            <Link
+              className="font-semibold text-primary underline-offset-2 transition-colors hover:text-accent-hover hover:underline"
+              href="/"
+            >
+              Request access
+            </Link>
+          </p>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function ProviderButton({
+  icon,
+  label,
+  loading,
+  disabled,
+  onClick,
+}: {
+  icon: string;
+  label: string;
+  loading: boolean;
+  disabled: boolean;
+  onClick: () => void;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      disabled={disabled}
+      className="flex h-[44px] w-full items-center justify-center rounded-lg border border-border-subtle bg-document-surface px-md font-ui-sm text-ui-sm font-medium text-text-primary shadow-sm transition-colors hover:bg-surface-container-low focus:outline-none focus:ring-2 focus:ring-border-subtle focus:ring-offset-2 disabled:opacity-60"
+    >
+      <Icon
+        name={loading ? "progress_activity" : icon}
+        className={cn("mr-xs text-[18px]", loading && "animate-spin")}
+      />{" "}
+      {label}
+    </button>
+  );
+}

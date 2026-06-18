@@ -5,6 +5,7 @@ from app.core.database import get_db
 from app.api.deps import get_current_user
 from app.models.database_models import User
 from app.schemas.auth import UserListResponse, UserListItem, UserUpdate, UserResponse
+from app.services.audit_service import record_audit, AuditAction
 
 router = APIRouter()
 
@@ -44,16 +45,32 @@ async def update_user(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ):
-    """Update user profile (name, avatar color, status)"""
+    """Update user profile (name, avatar color, status).
+
+    RBAC: a user may edit ONLY their own profile. Editing another user requires
+    an org-admin capability, which the scoped (folder/document) role model does
+    not provide in v1 (every user owns their own root folder, so
+    `can_manage_members` is not an org-wide admin signal). Editing others is
+    therefore forbidden for now; a dedicated org-admin role is future work.
+    """
     user = (
         await db.execute(select(User).where(User.id == id, User.org_id == current_user.org_id))
     ).scalars().first()
     if not user:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
 
+    if str(user.id) != str(current_user.id):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="You can only edit your own profile",
+        )
+
+    changed = {}
     if data.display_name is not None:
+        changed["display_name"] = data.display_name
         user.display_name = data.display_name
     if data.avatar_color is not None:
+        changed["avatar_color"] = data.avatar_color
         user.avatar_color = data.avatar_color
     if data.status is not None:
         if data.status not in ["active", "disabled"]:
@@ -61,8 +78,14 @@ async def update_user(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail="Status must be 'active' or 'disabled'"
             )
+        changed["status"] = data.status
         user.status = data.status
 
+    record_audit(
+        db, org_id=current_user.org_id, actor_id=current_user.id,
+        action=AuditAction.USER_UPDATE, target_type="user",
+        target_id=user.id, meta={"changed": changed},
+    )
     await db.commit()
     await db.refresh(user)
     return user

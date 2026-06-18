@@ -45,7 +45,13 @@ const nexusContent: Value = [
     type: "p",
     children: [
       {
-        text: "The current market conditions necessitate a paradigm shift in how we approach enterprise collaboration. Project Nexus aims to bridge the gap between structured documentation and fluid, real-time communication. By unifying these paradigms, we project a 24% increase in cross-functional team velocity.",
+        text: "The current market conditions necessitate a paradigm shift in how we approach enterprise collaboration. Project Nexus aims to bridge the gap between structured documentation and fluid, real-time communication. ",
+      },
+      {
+        // Demo AI-authored sentence — surfaces with "Show AI Edits" and the
+        // compare blue-override. aiEdit travels as a leaf mark (see ai-attribution.ts).
+        text: "By unifying these paradigms, we project a 24% increase in cross-functional team velocity.",
+        aiEdit: { authorId: "sarah", authorName: "Sarah Chen", ts: Date.now() },
       },
     ],
   },

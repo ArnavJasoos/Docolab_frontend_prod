@@ -10,6 +10,7 @@ from app.schemas.ai import (
     ApplyAIRecommendationResponse, AIJobStatusResponse
 )
 from app.services.auth_service import authorize
+from app.services.audit_service import record_audit, AuditAction
 
 router = APIRouter()
 
@@ -86,6 +87,13 @@ async def apply_ai_recommendation(
         reason="AI-generated suggestion from recommendation"
     )
     db.add(suggestion)
+    await db.flush()
+    record_audit(
+        db, org_id=current_user.org_id, actor_id=current_user.id,
+        action=AuditAction.AI_APPLY, target_type="suggestion",
+        target_id=suggestion.id, document_id=doc.id,
+        meta={"recommendation_id": str(recommendation.id), "job_id": job_id},
+    )
     await db.commit()
 
     return {

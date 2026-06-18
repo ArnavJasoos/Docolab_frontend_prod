@@ -16,7 +16,7 @@ export function DocTitle() {
 
   React.useLayoutEffect(() => {
     if (sizerRef.current) {
-      setWidth(Math.min(Math.max(sizerRef.current.offsetWidth + 4, 40), 420));
+      setWidth(Math.min(Math.max(sizerRef.current.offsetWidth + 4, 160), 640));
     }
   }, [title]);
 

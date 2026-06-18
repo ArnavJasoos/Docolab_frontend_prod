@@ -3,7 +3,7 @@
 import * as React from "react";
 import { toast } from "sonner";
 
-import type { Role, ShareState } from "@/lib/types";
+import type { Role, ShareState, User } from "@/lib/types";
 import {
   Dialog,
   DialogContent,
@@ -94,6 +94,8 @@ export function ShareDialog({
   const [email, setEmail] = React.useState("");
   const [inviteRole, setInviteRole] = React.useState<Role>("editor");
   const [inviting, setInviting] = React.useState(false);
+  const [suggestions, setSuggestions] = React.useState<User[]>([]);
+  const [showSuggestions, setShowSuggestions] = React.useState(false);
 
   React.useEffect(() => {
     if (!open) return;
@@ -106,13 +108,44 @@ export function ShareDialog({
     };
   }, [open, docId]);
 
+  // Roster typeahead: resolve names → real user ids for the backend.
+  React.useEffect(() => {
+    if (!open) return;
+    let cancelled = false;
+    void collaborators.searchUsers(docId, email).then((u) => {
+      if (!cancelled) setSuggestions(u);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [open, docId, email, state]);
+
+  const inviteKnown = async (user: User) => {
+    setInviting(true);
+    setShowSuggestions(false);
+    try {
+      const next = await collaborators.inviteUser(docId, user, inviteRole);
+      setState(next);
+      setEmail("");
+      toast.success(`Shared with ${user.name} as ${ROLE_LABEL[inviteRole].toLowerCase()}`);
+    } finally {
+      setInviting(false);
+    }
+  };
+
   const invite = async () => {
     const value = email.trim();
+    // Prefer an exact roster match so the backend gets a known user id + name.
+    const match = suggestions.find(
+      (u) => u.email.toLowerCase() === value.toLowerCase() || u.name.toLowerCase() === value.toLowerCase(),
+    );
+    if (match) return void inviteKnown(match);
     if (!value || !value.includes("@")) {
-      toast.error("Enter a valid email address.");
+      toast.error("Pick a person or enter a valid email address.");
       return;
     }
     setInviting(true);
+    setShowSuggestions(false);
     try {
       const next = await collaborators.inviteCollaborator(docId, value, inviteRole);
       setState(next);
@@ -160,7 +193,19 @@ export function ShareDialog({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-lg gap-0 p-0">
+      <DialogContent
+        showCloseButton={false}
+        aria-describedby={undefined}
+        style={{ backgroundColor: "#ffffff", width: "min(32rem, calc(100vw - 2rem))", maxWidth: "calc(100vw - 2rem)" }}
+        className="flex flex-col gap-0 border border-border-subtle p-0 opacity-100 shadow-float"
+      >
+        <button
+          onClick={() => onOpenChange(false)}
+          aria-label="Close"
+          className="absolute right-4 top-4 z-10 flex size-7 items-center justify-center rounded-full text-text-muted transition-colors hover:bg-surface-container hover:text-text-primary"
+        >
+          <Icon name="close" size={18} />
+        </button>
         <DialogHeader className="px-6 pt-6 pb-4">
           <DialogTitle className="font-ui-lg text-ui-lg">
             Share “{docTitle}”
@@ -168,15 +213,19 @@ export function ShareDialog({
         </DialogHeader>
 
         {/* Invite row */}
-        <div className="flex gap-2 px-6">
-          <div className="flex flex-1 items-center rounded-lg border border-border-subtle bg-surface-bright px-3 focus-within:border-primary-container focus-within:ring-1 focus-within:ring-primary-container">
+        <div className="relative flex gap-2 px-6">
+          <div className="flex flex-1 items-center rounded-lg border border-border-subtle bg-surface-container-lowest px-3 focus-within:border-primary-container focus-within:ring-1 focus-within:ring-primary-container">
             <Icon name="person_add" size={18} className="text-text-muted" />
             <input
               value={email}
-              onChange={(e) => setEmail(e.target.value)}
+              onChange={(e) => {
+                setEmail(e.target.value);
+                setShowSuggestions(true);
+              }}
+              onFocus={() => setShowSuggestions(true)}
               onKeyDown={(e) => e.key === "Enter" && void invite()}
-              placeholder="Add people by email"
-              type="email"
+              placeholder="Add people by name or email"
+              type="text"
               className="ml-2 flex-1 bg-transparent py-2 font-ui-sm text-ui-sm text-text-primary outline-none placeholder:text-text-muted"
             />
             <RoleSelect value={inviteRole} onChange={setInviteRole} />
@@ -188,6 +237,33 @@ export function ShareDialog({
           >
             {inviting ? "Inviting…" : "Invite"}
           </button>
+
+          {/* Roster typeahead */}
+          {showSuggestions && suggestions.length > 0 && (
+            <div className="absolute left-6 right-20 top-full z-10 mt-1 overflow-hidden rounded-lg border border-border-subtle bg-surface-container-lowest shadow-float">
+              {suggestions.map((u) => (
+                <button
+                  key={u.id}
+                  onClick={() => void inviteKnown(u)}
+                  className="flex w-full items-center gap-3 px-3 py-2 text-left hover:bg-surface-container"
+                >
+                  <Avatar size="sm">
+                    {u.avatarUrl && <AvatarImage src={u.avatarUrl} alt={u.name} />}
+                    <AvatarFallback>{initials(u.name)}</AvatarFallback>
+                  </Avatar>
+                  <div className="min-w-0 flex-1">
+                    <p className="truncate font-ui-sm text-ui-sm font-medium text-text-primary">
+                      {u.name}
+                    </p>
+                    <p className="truncate font-ui-xs text-ui-xs text-text-muted">
+                      {u.email}
+                    </p>
+                  </div>
+                  <Icon name="add" size={16} className="text-text-muted" />
+                </button>
+              ))}
+            </div>
+          )}
         </div>
 
         {/* People list */}

@@ -7,6 +7,7 @@ import { toast } from "sonner";
 import { useEditor } from "@/components/editor/editor-kit";
 import { useDocument } from "@/lib/store/document-store";
 import * as documents from "@/lib/api/documents";
+import { downloadDocumentPdf } from "@/lib/pdf-export";
 
 /** Custom event the title input listens for to enter rename mode. */
 export const RENAME_EVENT = "docflow:rename";
@@ -40,6 +41,16 @@ export function useDocActions() {
 
   const print = React.useCallback(() => window.print(), []);
 
+  const exportPdf = React.useCallback(async () => {
+    const id = toast.loading("Generating PDF…");
+    try {
+      await downloadDocumentPdf(editor.children, title || "document");
+      toast.success("Exported as PDF", { id });
+    } catch {
+      toast.error("Couldn't generate the PDF", { id });
+    }
+  }, [editor, title]);
+
   const wordCount = React.useCallback(() => {
     const text = editor.api.string([]) ?? "";
     const words = text.trim() ? text.trim().split(/\s+/).length : 0;
@@ -72,6 +83,7 @@ export function useDocActions() {
   return {
     focus,
     exportMarkdown,
+    exportPdf,
     print,
     wordCount,
     rename,

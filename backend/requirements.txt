@@ -13,6 +13,9 @@ pydantic[email]>=2.6.0
 pydantic-settings>=2.1.0
 pyjwt>=2.8.0
 passlib[bcrypt]>=1.7.4
+# passlib 1.7.4 can't read bcrypt >= 4.1 ("module 'bcrypt' has no attribute
+# '__about__'"); pin to a compatible release so password hashing works.
+bcrypt==4.0.1
 
 # Testing / HTTP client
 httpx>=0.27.0

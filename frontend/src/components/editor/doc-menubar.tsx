@@ -3,8 +3,10 @@
 import * as React from "react";
 import { useRouter } from "next/navigation";
 import { KEYS } from "platejs";
+import { usePluginOption } from "platejs/react";
 
 import { useEditor } from "@/components/editor/editor-kit";
+import { aiAttributionPlugin } from "@/components/editor/plugins/ai-attribution-kit";
 import { useDocActions } from "@/components/editor/use-doc-actions";
 import { useDocument } from "@/lib/store/document-store";
 import {
@@ -33,6 +35,8 @@ export function DocMenubar() {
     setVersionsOpen,
     saveNow,
   } = useDocument();
+
+  const showAiEdits = usePluginOption(aiAttributionPlugin, "show") as boolean;
 
   const focus = () => editor.tf.focus();
 
@@ -96,6 +100,7 @@ export function DocMenubar() {
           <MenubarItem onSelect={() => void a.makeCopy()}>Make a copy</MenubarItem>
           <MenubarSeparator />
           <MenubarItem onSelect={a.exportMarkdown}>Export as Markdown</MenubarItem>
+          <MenubarItem onSelect={() => void a.exportPdf()}>Export as PDF</MenubarItem>
           <MenubarItem onSelect={a.print}>
             Print<MenubarShortcut>⌘P</MenubarShortcut>
           </MenubarItem>
@@ -132,6 +137,14 @@ export function DocMenubar() {
           </MenubarItem>
           <MenubarItem onSelect={() => setCommentsOpen(!commentsOpen)}>
             {commentsOpen ? "Hide comments" : "Show comments"}
+          </MenubarItem>
+          <MenubarSeparator />
+          <MenubarItem
+            onSelect={() =>
+              editor.setOption(aiAttributionPlugin, "show", !showAiEdits)
+            }
+          >
+            {showAiEdits ? "Hide AI Edits" : "Show AI Edits"}
           </MenubarItem>
         </MenubarContent>
       </MenubarMenu>

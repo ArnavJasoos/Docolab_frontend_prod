@@ -11,12 +11,18 @@
 // =============================================================================
 
 import type { User } from "@/lib/types";
-import { read, remove, write } from "@/lib/api/db";
+import { read, remove, write, latency } from "@/lib/api/db";
 import { apiFetch, setToken, clearToken } from "@/lib/api/client";
 
 const KEY = "session";
 
 export type Provider = "google" | "sso";
+
+// Built-in demo account for the showcase build — no backend account required.
+// `login()` and the provider buttons short-circuit to a local session so the
+// app is explorable without a running auth backend.
+const DEMO_USERNAME = "admin";
+const DEMO_PASSWORD = "admin";
 
 /** Raw user shape returned by the backend (UserResponse). */
 interface UserResponse {
@@ -54,6 +60,42 @@ function establishSession(result: AuthResult): User {
   return user;
 }
 
+/**
+ * Establish a local, backend-free session for the demo build. Used by the
+ * built-in admin account and the social/SSO buttons so they actually sign the
+ * user in instead of erroring out.
+ */
+function establishDemoSession(profile: { name: string; email: string }): User {
+  const user: User = { id: "demo-admin", name: profile.name, email: profile.email };
+  setToken("demo-session"); // placeholder bearer; demo routes don't hit protected endpoints
+  write(KEY, user);
+  return user;
+}
+
+/**
+ * Username/password login used by the /login page.
+ *
+ *   - The demo account `admin` / `admin` logs in instantly (no backend).
+ *   - Anything else is treated as an email and sent to the real backend.
+ */
+export async function login(input: {
+  username: string;
+  password: string;
+}): Promise<User> {
+  const username = input.username.trim();
+
+  if (username.toLowerCase() === DEMO_USERNAME && input.password === DEMO_PASSWORD) {
+    await latency(); // mirror the network feel of a real sign-in
+    return establishDemoSession({ name: "Admin", email: "admin@docflow.local" });
+  }
+
+  // Fall back to the real email + password backend.
+  if (!username.includes("@")) {
+    throw new Error("Invalid username or password.");
+  }
+  return signIn({ email: username, password: input.password });
+}
+
 export async function signUp(input: {
   name: string;
   email: string;
@@ -88,10 +130,17 @@ export async function signIn(input: {
   return establishSession(result);
 }
 
-// The backend has no OAuth/SSO endpoint yet (v1 is email + password only).
-// Surface a clear message instead of silently faking a session.
-export async function signInWithProvider(_provider: Provider): Promise<User> {
-  throw new Error("Social sign-in isn't available yet — use email and password.");
+// The backend has no real OAuth/SSO endpoint yet (v1 is email + password only).
+// For the demo build we establish a local session so the Google / SSO buttons
+// on the login and registration pages actually sign the user in.
+const PROVIDER_PROFILE: Record<Provider, { name: string; email: string }> = {
+  google: { name: "Google User", email: "demo@gmail.com" },
+  sso: { name: "SSO User", email: "demo@workspace.com" },
+};
+
+export async function signInWithProvider(provider: Provider): Promise<User> {
+  await latency();
+  return establishDemoSession(PROVIDER_PROFILE[provider]);
 }
 
 export async function signOut(): Promise<void> {

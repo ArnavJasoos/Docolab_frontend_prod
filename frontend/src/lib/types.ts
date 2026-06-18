@@ -69,6 +69,9 @@ export interface DocVersion {
   authorId: string;
   authorName: string;
   isCurrent: boolean;
+  /** Cold approved baseline vs. a warm submission awaiting owner review. */
+  kind?: "submission" | "approved";
+  versionNo?: number;
 }
 
 export interface ShareState {

@@ -27,6 +27,7 @@ from app.schemas.recommendation import (
     RecommendationResponseOut, RecommendationResponseListResponse,
 )
 from app.services.auth_service import authorize
+from app.services.audit_service import record_audit, AuditAction
 
 router = APIRouter()
 
@@ -115,6 +116,13 @@ async def create_recommendation(
         status="open",
     )
     db.add(rec)
+    await db.flush()
+    record_audit(
+        db, org_id=current_user.org_id, actor_id=current_user.id,
+        action=AuditAction.RECOMMENDATION_CREATE, target_type="recommendation",
+        target_id=rec.id, document_id=version.document_id,
+        meta={"version_id": str(version.id)},
+    )
     await db.commit()
     await db.refresh(rec)
     return rec
@@ -132,6 +140,12 @@ async def update_recommendation(
     await _check_permission(db, current_user.id, rec.document_id, "can_give_final_approval")
 
     rec.status = data.status
+    record_audit(
+        db, org_id=current_user.org_id, actor_id=current_user.id,
+        action=AuditAction.RECOMMENDATION_UPDATE, target_type="recommendation",
+        target_id=rec.id, document_id=rec.document_id,
+        meta={"status": data.status},
+    )
     await db.commit()
     await db.refresh(rec)
     return rec
@@ -182,6 +196,13 @@ async def create_response(
         body=data.body,
     )
     db.add(response)
+    await db.flush()
+    record_audit(
+        db, org_id=current_user.org_id, actor_id=current_user.id,
+        action=AuditAction.RECOMMENDATION_RESPONSE, target_type="recommendation_response",
+        target_id=response.id, document_id=rec.document_id,
+        meta={"recommendation_id": str(rec.id)},
+    )
     await db.commit()
     await db.refresh(response)
     return response

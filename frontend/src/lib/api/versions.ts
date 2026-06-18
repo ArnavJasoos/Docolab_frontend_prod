@@ -27,7 +27,7 @@ interface VersionResponse {
 }
 
 function toDocVersion(v: VersionResponse, isCurrent: boolean): DocVersion {
-  const kindLabel = v.kind === "approved" ? "Approved" : "Submission";
+  const kindLabel = v.kind === "approved" ? "Approved" : "Pending review";
   return {
     id: v.id,
     label: `Version ${v.version_no} · ${kindLabel}`,
@@ -35,8 +35,10 @@ function toDocVersion(v: VersionResponse, isCurrent: boolean): DocVersion {
     authorId: v.created_by,
     // Backend returns the author id only; resolve to a display name once
     // lib/api/users (GET /api/users) is wired. Shows the id for now.
-    authorName: v.created_by,
+    authorName: v.created_by === "00000000-0000-0000-0000-0000000000aa" ? "You" : v.created_by,
     isCurrent,
+    kind: v.kind,
+    versionNo: v.version_no,
   };
 }
 
@@ -73,6 +75,42 @@ export async function snapshotVersion(
     authorName: "You",
     isCurrent: true,
   };
+}
+
+/**
+ * Submit the live document for owner approval (freezes a warm submission).
+ * Maps to POST /documents/:id/submit-for-approval.
+ */
+export async function submitForApproval(
+  docId: string,
+): Promise<{ versionId: string; versionNo: number; message: string }> {
+  const res = await apiFetch<{ version_id: string; version_no: number; message: string }>(
+    `/documents/${docId}/submit-for-approval`,
+    { method: "POST", body: "{}" },
+  );
+  return { versionId: res.version_id, versionNo: res.version_no, message: res.message };
+}
+
+/** Owner approves a submission version. The note becomes a recommendation. */
+export async function approveVersion(
+  versionId: string,
+  note?: string,
+): Promise<void> {
+  await apiFetch(`/versions/${versionId}/approve`, {
+    method: "POST",
+    body: JSON.stringify({ note: note ?? "" }),
+  });
+}
+
+/** Owner rejects a submission version with required change notes. */
+export async function rejectVersion(
+  versionId: string,
+  note?: string,
+): Promise<void> {
+  await apiFetch(`/versions/${versionId}/reject`, {
+    method: "POST",
+    body: JSON.stringify({ note: note ?? "" }),
+  });
 }
 
 /**

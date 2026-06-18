@@ -6,6 +6,8 @@ from app.core.database import get_db
 from app.api.deps import get_current_user
 from app.models.database_models import Folder, User, Document, Role, Assignment
 from app.schemas.folder import FolderCreate, FolderResponse, FolderUpdate, FolderTreeItem, FolderListResponse
+from app.services.auth_service import require_permission
+from app.services.audit_service import record_audit, AuditAction
 
 router = APIRouter()
 
@@ -36,12 +38,17 @@ async def _grant_owner(db: AsyncSession, user: User, scope_type: str, scope_id):
 
 @router.post("", response_model=FolderResponse, status_code=status.HTTP_201_CREATED)
 async def create_folder(data: FolderCreate, db: AsyncSession = Depends(get_db), current_user: User = Depends(get_current_user)):
+    # RBAC (bootstrap-safe): a ROOT folder (no parent) is open to any logged-in
+    # member — this is the entry point that lets a brand-new user create their
+    # own workspace and become its owner. A NESTED folder requires edit rights
+    # on the parent, so you can't drop folders into someone else's space.
     if data.parent_folder_id:
         parent = (
             await db.execute(select(Folder).where(Folder.id == data.parent_folder_id))
         ).scalars().first()
         if not parent:
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Parent folder not found")
+        await require_permission(db, current_user.id, "can_edit_direct", "folder", data.parent_folder_id)
 
     folder = Folder(
         id=uuid.uuid4(),
@@ -53,6 +60,12 @@ async def create_folder(data: FolderCreate, db: AsyncSession = Depends(get_db), 
     db.add(folder)
     await db.flush()
     await _grant_owner(db, current_user, "folder", folder.id)
+    record_audit(
+        db, org_id=current_user.org_id, actor_id=current_user.id,
+        action=AuditAction.FOLDER_CREATE, target_type="folder",
+        target_id=folder.id,
+        meta={"name": folder.name, "parent_folder_id": str(data.parent_folder_id) if data.parent_folder_id else None},
+    )
     await db.commit()
     await db.refresh(folder)
     return folder
@@ -99,7 +112,12 @@ async def update_folder(
     if not folder:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Folder not found")
 
+    # RBAC: renaming/moving a folder requires edit rights on it.
+    await require_permission(db, current_user.id, "can_edit_direct", "folder", id)
+
+    changed = {}
     if data.name is not None:
+        changed["name"] = data.name
         folder.name = data.name
 
     if data.parent_folder_id is not None:
@@ -109,8 +127,16 @@ async def update_folder(
             ).scalars().first()
             if not parent:
                 raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Parent folder not found")
+            # Moving under a new parent also requires edit rights there.
+            await require_permission(db, current_user.id, "can_edit_direct", "folder", data.parent_folder_id)
+        changed["parent_folder_id"] = str(data.parent_folder_id) if data.parent_folder_id else None
         folder.parent_folder_id = data.parent_folder_id
 
+    record_audit(
+        db, org_id=current_user.org_id, actor_id=current_user.id,
+        action=AuditAction.FOLDER_UPDATE, target_type="folder",
+        target_id=folder.id, meta={"changed": changed},
+    )
     await db.commit()
     await db.refresh(folder)
     return folder
@@ -123,6 +149,9 @@ async def delete_folder(id: str, db: AsyncSession = Depends(get_db), current_use
     ).scalars().first()
     if not folder:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Folder not found")
+
+    # RBAC: deletion is destructive -> owner-level only.
+    await require_permission(db, current_user.id, "can_manage_members", "folder", id)
 
     has_children = (
         await db.execute(select(Folder).where(Folder.parent_folder_id == id))
@@ -137,5 +166,10 @@ async def delete_folder(id: str, db: AsyncSession = Depends(get_db), current_use
             detail="Cannot delete folder with children or documents"
         )
 
+    record_audit(
+        db, org_id=current_user.org_id, actor_id=current_user.id,
+        action=AuditAction.FOLDER_DELETE, target_type="folder",
+        target_id=folder.id, meta={"name": folder.name},
+    )
     await db.delete(folder)
     await db.commit()

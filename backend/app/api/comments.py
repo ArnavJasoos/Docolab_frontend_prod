@@ -21,6 +21,7 @@ from app.api.deps import get_current_user
 from app.models.database_models import User, Document, Comment, Suggestion
 from app.schemas.comment import CommentCreate, CommentOut, CommentListResponse, CommentResolve
 from app.services.auth_service import authorize
+from app.services.audit_service import record_audit, AuditAction
 
 router = APIRouter()
 
@@ -124,6 +125,14 @@ async def create_comment(
         parent_comment_id=data.parent_comment_id,
     )
     db.add(comment)
+    await db.flush()
+    record_audit(
+        db, org_id=current_user.org_id, actor_id=current_user.id,
+        action=AuditAction.COMMENT_CREATE, target_type="comment",
+        target_id=comment.id, document_id=doc.id,
+        meta={"suggestion_id": str(data.suggestion_id) if data.suggestion_id else None,
+              "parent_comment_id": str(data.parent_comment_id) if data.parent_comment_id else None},
+    )
     await db.commit()
     await db.refresh(comment)
     return comment

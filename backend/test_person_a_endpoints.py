@@ -103,7 +103,7 @@ def main():
 
         # ---- Versions -> Recommendations + responses ----------------------
         print("\n[Recommendations]")
-        r = client.post(f"/versions/documents/{doc_id}/submit-for-approval", json={}, headers=A)
+        r = client.post(f"/documents/{doc_id}/submit-for-approval", json={}, headers=A)
         check("submit-for-approval -> 200", r.status_code == 200, str(r.status_code))
         vid = r.json().get("version_id") if r.status_code == 200 else None
         rid = None

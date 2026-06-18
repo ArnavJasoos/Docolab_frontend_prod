@@ -1,6 +1,7 @@
 "use client";
 
 import * as React from "react";
+import dynamic from "next/dynamic";
 import { Plate, usePlateEditor } from "platejs/react";
 import { YjsPlugin } from "@platejs/yjs/react";
 
@@ -9,8 +10,14 @@ import { EditorKit } from "@/components/editor/editor-kit";
 import { createYjsPlugin } from "@/components/editor/plugins/yjs-kit";
 import { Editor, EditorContainer } from "@/components/ui/editor";
 import { EditorTopBar } from "@/components/editor/editor-top-bar";
-import { CommentsPanel } from "@/components/editor/comments-panel";
-import { discussionPlugin } from "@/components/editor/plugins/discussion-kit";
+
+// The comments panel is only mounted when the user opens it, so keep it out of
+// the initial editor chunk and load it on demand.
+const CommentsPanel = dynamic(
+  () =>
+    import("@/components/editor/comments-panel").then((m) => m.CommentsPanel),
+  { ssr: false },
+);
 import { DocumentProvider, useDocument } from "@/lib/store/document-store";
 import { getDiscussions } from "@/lib/api/comments";
 import { getToken } from "@/lib/api/client";
@@ -62,17 +69,6 @@ function LoadedWorkspace({ doc }: { doc: DocumentRecord }) {
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
-
-  // Hydrate this document's comment threads into the discussion plugin.
-  React.useEffect(() => {
-    let cancelled = false;
-    void getDiscussions(docId).then((d) => {
-      if (!cancelled) editor.setOption(discussionPlugin, "discussions", d);
-    });
-    return () => {
-      cancelled = true;
-    };
-  }, [docId, editor]);
 
   // ⌘S / Ctrl+S flushes a manual save.
   React.useEffect(() => {

@@ -1,3 +1,4 @@
+from fastapi import HTTPException, status
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from app.models.database_models import Assignment, Folder, Document, Role, RolePermission
@@ -60,3 +61,23 @@ async def authorize(db: AsyncSession, user_id, permission: str, scope_type: str,
             break
 
     return False, None, None
+
+
+async def require_permission(
+    db: AsyncSession, user_id, permission: str, scope_type: str, scope_id
+) -> tuple[str | None, str | None]:
+    """RBAC guard: raise 403 unless `user_id` holds `permission` on the scope.
+
+    This is the single choke-point every mutating endpoint calls before it
+    changes state. Returns (resolved_role_name, via_scope) on success so the
+    caller can log it. Reuses authorize()'s document -> folder -> parent walk,
+    so a role granted on a folder is inherited by its documents, and a role
+    granted directly on a document overrides the inherited one.
+    """
+    has_perm, role_name, via = await authorize(db, user_id, permission, scope_type, scope_id)
+    if not has_perm:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail=f"Forbidden: requires '{permission}' on this {scope_type}",
+        )
+    return role_name, via

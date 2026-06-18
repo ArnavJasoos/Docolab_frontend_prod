@@ -4,7 +4,7 @@ import type {
 } from '@/components/editor/use-chat';
 import type { NextRequest } from 'next/server';
 
-import { createGateway } from '@ai-sdk/gateway';
+import { createGoogleGenerativeAI } from '@ai-sdk/google';
 import {
   type LanguageModel,
   type UIMessageStreamWriter,
@@ -30,6 +30,15 @@ import {
   getGeneratePrompt,
 } from './prompt';
 
+/** Map any legacy/provider-prefixed model id onto a Gemini model name. */
+function toGeminiModel(id?: string): string {
+  const fallback = 'gemini-2.5-flash';
+  if (!id) return fallback;
+  if (id.startsWith('google/')) return id.slice('google/'.length);
+  if (id.startsWith('gemini')) return id;
+  return fallback;
+}
+
 export async function POST(req: NextRequest) {
   const { apiKey: key, ctx, messages: messagesRaw, model } = await req.json();
 
@@ -41,20 +50,22 @@ export async function POST(req: NextRequest) {
     value: children,
   });
 
-  const apiKey = key || process.env.AI_GATEWAY_API_KEY;
+  const apiKey = key || process.env.GOOGLE_GENERATIVE_AI_API_KEY;
 
   if (!apiKey) {
     return NextResponse.json(
-      { error: 'Missing AI Gateway API key.' },
+      { error: 'Missing Gemini API key. Set GOOGLE_GENERATIVE_AI_API_KEY.' },
       { status: 401 }
     );
   }
 
   const isSelecting = editor.api.isExpanded();
 
-  const gatewayProvider = createGateway({
-    apiKey,
-  });
+  // Demo wiring: every AI step runs through Gemini. Legacy model ids passed by
+  // existing call sites (e.g. "openai/gpt-4o-mini", "google/gemini-2.5-flash")
+  // are mapped onto a Gemini model so nothing else has to change.
+  const google = createGoogleGenerativeAI({ apiKey });
+  const gatewayProvider = (id?: string) => google(toGeminiModel(id));
 
   try {
     const stream = createUIMessageStream<ChatMessage>({

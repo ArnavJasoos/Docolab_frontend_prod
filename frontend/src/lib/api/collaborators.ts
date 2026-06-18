@@ -45,6 +45,43 @@ function findUserByEmail(email: string): User | undefined {
   return USERS.find((u) => u.email.toLowerCase() === email.toLowerCase());
 }
 
+/**
+ * Roster typeahead for the share dialog. Returns known org members matching
+ * `query` (by name or email) who are not already collaborators on the doc, so
+ * the owner picks people by name and the backend receives a real user id.
+ */
+export async function searchUsers(
+  docId: string,
+  query: string,
+): Promise<User[]> {
+  await latency(60);
+  const taken = new Set(load(docId).collaborators.map((c) => c.user.id));
+  const q = query.trim().toLowerCase();
+  return USERS.filter((u) => !taken.has(u.id)).filter(
+    (u) =>
+      !q ||
+      u.name.toLowerCase().includes(q) ||
+      u.email.toLowerCase().includes(q),
+  ).slice(0, 6);
+}
+
+/** Invite an already-known roster user by id (name flows to the backend). */
+export async function inviteUser(
+  docId: string,
+  user: User,
+  role: Role,
+): Promise<ShareState> {
+  await latency(140);
+  const state = load(docId);
+  const without = state.collaborators.filter((c) => c.user.id !== user.id);
+  const next: ShareState = {
+    ...state,
+    collaborators: [...without, { user, role }],
+  };
+  write(keyFor(docId), next);
+  return next;
+}
+
 export async function inviteCollaborator(
   docId: string,
   email: string,

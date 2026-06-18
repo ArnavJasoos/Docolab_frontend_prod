@@ -5,6 +5,8 @@ import * as React from 'react';
 import {
   AIChatPlugin,
   AIPlugin,
+  acceptAISuggestions,
+  rejectAISuggestions,
   useEditorChat,
   useLastAssistantMessage,
 } from '@platejs/ai/react';
@@ -52,6 +54,11 @@ import {
   CommandItem,
   CommandList,
 } from '@/components/ui/command';
+import {
+  currentAuthor,
+  markEditorTextAsAi,
+  stampPendingAiEdits,
+} from '@/lib/ai-attribution';
 import {
   Popover,
   PopoverAnchor,
@@ -284,11 +291,29 @@ const aiChatItems = {
       const { mode, toolName } = editor.getOptions(AIChatPlugin);
 
       if (mode === 'chat' && toolName === 'generate') {
+        // Attribute the generated text (lives in the AI sub-editor) before it
+        // is inserted into the document.
+        markEditorTextAsAi(aiEditor, currentAuthor(editor));
         return editor
           .getTransforms(AIChatPlugin)
           .aiChat.replaceSelection(aiEditor);
       }
 
+      // Edit mode applies changes as suggestion marks (green insert / red delete).
+      // Finalize them: insertions become permanent text (un-highlighted),
+      // deletions are removed from the document.
+      if (mode === 'chat' && toolName === 'edit') {
+        // Tag the AI insertions with attribution before they're finalized.
+        stampPendingAiEdits(editor);
+        acceptAISuggestions(editor);
+        editor.getApi(AIChatPlugin).aiChat.hide();
+        editor.tf.focus({ edge: 'end' });
+        return;
+      }
+
+      // Insert mode: the streamed preview text carries the transient AI mark;
+      // attribute it before accept turns it into permanent text.
+      stampPendingAiEdits(editor);
       editor.getTransforms(AIChatPlugin).aiChat.accept();
       editor.tf.focus({ edge: 'end' });
     },
@@ -335,7 +360,13 @@ Start writing a new paragraph AFTER <Document> ONLY ONE SENTENCE`
     shortcut: 'Escape',
     value: 'discard',
     onSelect: ({ editor }) => {
-      editor.getTransforms(AIPlugin).ai.undo();
+      const { mode, toolName } = editor.getOptions(AIChatPlugin);
+      // Edit mode: drop the suggestion marks (remove green inserts, restore red deletes).
+      if (mode === 'chat' && toolName === 'edit') {
+        rejectAISuggestions(editor);
+      } else {
+        editor.getTransforms(AIPlugin).ai.undo();
+      }
       editor.getApi(AIChatPlugin).aiChat.hide();
     },
   },
@@ -416,6 +447,7 @@ Start writing a new paragraph AFTER <Document> ONLY ONE SENTENCE`
     label: 'Insert below',
     value: 'insertBelow',
     onSelect: ({ aiEditor, editor }) => {
+      markEditorTextAsAi(aiEditor, currentAuthor(editor));
       /** Format: 'none' Fix insert table */
       void editor
         .getTransforms(AIChatPlugin)
@@ -451,6 +483,7 @@ Start writing a new paragraph AFTER <Document> ONLY ONE SENTENCE`
     label: 'Replace selection',
     value: 'replace',
     onSelect: ({ aiEditor, editor }) => {
+      markEditorTextAsAi(aiEditor, currentAuthor(editor));
       void editor.getTransforms(AIChatPlugin).aiChat.replaceSelection(aiEditor);
     },
   },
