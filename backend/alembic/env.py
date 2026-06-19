@@ -46,7 +46,7 @@ def _get_url() -> str:
         host     = os.environ.get("PGHOST",     "localhost")
         port     = os.environ.get("PGPORT",     "5432")
         user     = os.environ.get("PGUSER",     "postgres")
-        password = os.environ.get("PGPASSWORD", "postgres")
+        password = os.environ.get("PGPASSWORD", "root ")
         dbname   = os.environ.get("PGDATABASE", "docplatform")
         url = f"postgresql+asyncpg://{user}:{password}@{host}:{port}/{dbname}"
 
