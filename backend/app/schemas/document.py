@@ -4,12 +4,12 @@ from pydantic import BaseModel
 from typing import Optional
 
 class DocumentCreate(BaseModel):
-    folder_id: str
+    folder_id: Optional[uuid.UUID] = None
     title: str
 
 class DocumentUpdate(BaseModel):
     title: Optional[str] = None
-    folder_id: Optional[str] = None
+    folder_id: Optional[uuid.UUID] = None
     # NOTE: no `starred` here — bookmarks are personal; use PUT/DELETE
     # /documents/{id}/star instead. `trashed` is the reversible recycle bin.
     trashed: Optional[bool] = None
