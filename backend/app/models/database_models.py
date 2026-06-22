@@ -85,7 +85,7 @@ class User(Base):
 
 class Role(Base):
     """
-    The fixed role set: owner / approver / editor / suggester / viewer.
+    The fixed role set: owner / approver / editor / viewer.
     UNIQUE (org_id, name) makes seed data idempotent.
     """
     __tablename__ = "roles"
@@ -184,7 +184,11 @@ class Document(Base):
 
     id:                 Mapped[uuid.UUID]        = mapped_column(UUID(as_uuid=True), primary_key=True, default=_uuid)
     org_id:             Mapped[uuid.UUID]        = mapped_column(UUID(as_uuid=True), nullable=False)
-    folder_id:          Mapped[uuid.UUID]        = mapped_column(UUID(as_uuid=True), ForeignKey("folders.id"), nullable=False)
+    folder_id: Mapped[Optional[uuid.UUID]] = mapped_column(
+            UUID(as_uuid=True), 
+            ForeignKey("folders.id"), 
+            nullable=True  # <--- CHANGE THIS
+        )
     title:              Mapped[str]              = mapped_column(Text, nullable=False)
     yjs_doc_key:        Mapped[str]              = mapped_column(Text, nullable=False)
     schema_version:     Mapped[int]              = mapped_column(Integer, nullable=False, server_default="1")

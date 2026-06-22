@@ -76,11 +76,15 @@ ROLE_PERMISSIONS = {
         "can_view_history", "can_manage_members",
     ],
     "approver": [
-        "can_suggest", "can_resolve_suggestion", "can_submit_for_approval",
-        "can_give_final_approval", "can_approve_level", "can_view_history",
+        # A reviewer/gatekeeper that can ALSO edit content directly.
+        "can_edit_direct", "can_suggest", "can_resolve_suggestion",
+        "can_submit_for_approval", "can_give_final_approval",
+        "can_approve_level", "can_view_history",
     ],
-    "editor": ["can_edit_direct", "can_suggest", "can_view_history"],
-    "suggester": ["can_suggest", "can_view_history"],
+    # An editor writes directly AND can submit its own work for approval.
+    "editor": ["can_edit_direct", "can_suggest", "can_submit_for_approval", "can_view_history"],
+    # NOTE: the old "suggester" role was removed (redundant — direct edits + the
+    # suggestion review flow cover it). Roles are now: owner / approver / editor / viewer.
     "viewer": ["can_view_history"],
 }
 

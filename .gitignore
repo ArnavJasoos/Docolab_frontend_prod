@@ -66,3 +66,6 @@ yarn-error.log*
 .mypy_cache/
 .coverage
 htmlcov/
+
+# frontend_HEAD
+frontend~HEAD/

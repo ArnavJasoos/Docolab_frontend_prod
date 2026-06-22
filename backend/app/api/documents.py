@@ -57,21 +57,38 @@ def _with_star(doc: Document, starred: bool) -> Document:
 
 
 @router.post("", response_model=DocumentResponse, status_code=status.HTTP_201_CREATED)
-async def create_document(data: DocumentCreate, db: AsyncSession = Depends(get_db), current_user: User = Depends(get_current_user)):
-    folder = (
-        await db.execute(select(Folder).where(Folder.id == data.folder_id))
-    ).scalars().first()
-    if not folder:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Folder not found")
+async def create_document(
+    data: DocumentCreate, 
+    db: AsyncSession = Depends(get_db), 
+    current_user: User = Depends(get_current_user)
+):
+    # 1. Handle Permission and Folder Validation
+    if data.folder_id:
+        # User wants to create inside a folder
+        folder = (
+            await db.execute(select(Folder).where(Folder.id == data.folder_id))
+        ).scalars().first()
+        if not folder:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Folder not found")
+        
+        # RBAC: check edit rights on the specific folder
+        await require_permission(db, current_user.id, "can_edit_direct", "folder", data.folder_id)
+        scope_type = "folder"
+        scope_id = data.folder_id
+    else:
+        # User wants to create at Root level
+        # RBAC: check if they have permission to create at the Organization level
+        # (Assuming you use the Org ID as the scope for root documents)
+        await require_permission(db, current_user.id, "can_edit_direct", "organization", current_user.org_id)
+        scope_type = "organization"
+        scope_id = current_user.org_id
 
-    # RBAC: you may only create a document in a folder you can edit.
-    await require_permission(db, current_user.id, "can_edit_direct", "folder", data.folder_id)
-
+    # 2. Create Document
     doc_id = uuid.uuid4()
     doc = Document(
         id=doc_id,
         org_id=current_user.org_id,
-        folder_id=data.folder_id,
+        folder_id=data.folder_id, # Can be None now
         title=data.title,
         yjs_doc_key=str(doc_id),
         schema_version=1,
@@ -83,17 +100,21 @@ async def create_document(data: DocumentCreate, db: AsyncSession = Depends(get_d
     )
     db.add(doc)
     await db.flush()
-    # Creator becomes owner of the document they create (document-scoped), so a
-    # junior asked to "create the document" owns it and can later hand it over.
+
+    # 3. Grant Owner permissions to creator
     await _grant_owner(db, current_user, "document", doc.id)
+
+    # 4. Audit Log
     record_audit(
         db, org_id=current_user.org_id, actor_id=current_user.id,
         action=AuditAction.DOCUMENT_CREATE, target_type="document",
         target_id=doc.id, document_id=doc.id,
-        meta={"title": doc.title, "folder_id": str(doc.folder_id)},
+        meta={"title": doc.title, "folder_id": str(data.folder_id) if data.folder_id else "root"},
     )
+    
     await db.commit()
     await db.refresh(doc)
+    
     return _with_star(doc, False)
 
 
