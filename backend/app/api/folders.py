@@ -158,7 +158,12 @@ async def delete_folder(id: str, db: AsyncSession = Depends(get_db), current_use
         await db.execute(select(Folder).where(Folder.parent_folder_id == id))
     ).scalars().first() is not None
     has_documents = (
-        await db.execute(select(Document).where(Document.folder_id == id))
+        await db.execute(
+            select(Document).where(
+                Document.folder_id == id,
+                Document.status != "deleted",
+            )
+        )
     ).scalars().first() is not None
 
     if has_children or has_documents:

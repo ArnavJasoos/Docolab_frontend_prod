@@ -163,9 +163,6 @@ async def startup_event():
                         scope_type="folder",
                         scope_id=root.id,
                     ))
-                    # Org-scoped owner assignment => the admin is the org admin
-                    # (can manage members org-wide, manage approval policies,
-                    # and read the org-wide audit log).
                     db.add(Assignment(
                         org_id=org_id,
                         user_id=admin.id,
@@ -174,6 +171,33 @@ async def startup_event():
                         scope_id=org_id,
                     ))
                 await db.commit()
+            else:
+                # Ensure org-scoped owner assignment exists (may be missing if
+                # admin was seeded before v2 startup code added this assignment).
+                owner_role = (
+                    await db.execute(
+                        select(Role).where(Role.org_id == org_id, Role.name == "owner")
+                    )
+                ).scalars().first()
+                if owner_role:
+                    existing_org_assignment = (
+                        await db.execute(
+                            select(Assignment).where(
+                                Assignment.user_id == admin.id,
+                                Assignment.scope_type == "org",
+                                Assignment.scope_id == org_id,
+                            )
+                        )
+                    ).scalars().first()
+                    if existing_org_assignment is None:
+                        db.add(Assignment(
+                            org_id=org_id,
+                            user_id=admin.id,
+                            role_id=owner_role.id,
+                            scope_type="org",
+                            scope_id=org_id,
+                        ))
+                        await db.commit()
         except Exception as e:
             await db.rollback()
             raise e

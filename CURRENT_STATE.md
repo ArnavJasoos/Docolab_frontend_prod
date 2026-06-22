@@ -12,6 +12,8 @@ Docolab is a collaborative documentation platform: a **Plate/Slate editor** fron
 
 > **Status note (this branch `feature/yjs-hocuspocus-integration`):** §§1–10 below describe the v2 backend. The real-time collaboration layer (the `hocuspocus-server/` Node service + frontend Yjs wiring) was added/validated after those sections were written — see **§11 (collab changelog)** and **§12 (backend function reference)**. Where older sections say live collab is "not built / stubbed," §11 supersedes them.
 
+> **API-fix note (branch `fix/api-missing-routes`):** after the v2 merge, 10 endpoints were reported "broken." Root cause was a **stale server process** (8 routes 404’d because the running process predated the v2 merge) plus **two real RBAC bugs** (org-admin couldn’t create/attach approval policies) and **one folder-delete bug** (soft-deleted docs blocked folder removal). All three code bugs are now fixed and the full test matrix passes — see **§14**.
+
 ---
 
 ## 2. Backend
@@ -324,6 +326,48 @@ Brief signatures so another chat has full context. Format: `METHOD path → hand
 
 **Local config (gitignored, not committed):** `backend/.env`, `frontend/.env.local`, `hocuspocus-server/.env`.
 
+---
+
+## 14. API fixes (branch `fix/api-missing-routes`)
+
+After the v2 feature merge, 10 endpoints were reported broken. Investigation split them into three root causes; all are resolved and re-verified.
+
+### Root cause 1 — stale server process (8 endpoints, no code change)
+The running uvicorn process was started **before** the v2 merge, so it never loaded the new routes. The routes existed in code; the process was old. Restarting with the current code (which auto-runs `alembic upgrade head` → `0004`) restored them:
+
+| Method | Endpoint | Was | Now |
+|---|---|---|---|
+| POST | `/api/auth/refresh` | 404 | 200 (rotates tokens) |
+| POST | `/api/auth/logout` | 404 | 200 (revokes token) |
+| GET | `/api/documents` (no `folder_id`) | 422 | 200 (org-wide list) |
+| GET | `/api/audit` (org-wide) | 404 | 200 (org-admin) |
+| PUT | `/api/documents/{id}/star` | 404 | 200 |
+| DELETE | `/api/documents/{id}/star` | 404 | 200 |
+| PATCH | `/api/approval-policies/{id}` | 404 | 200 |
+| GET | `/api/versions/{id}/approval-status` | 404 | 200 |
+
+### Root cause 2 — missing org-scoped admin assignment (`main.py`)
+`POST /api/approval-policies` and `PATCH /api/documents/{id}/approval-policy` returned **403** for the bootstrap admin. The v2 startup seed only created the admin's **org-scoped owner** assignment inside the `if admin is None` branch — so a pre-existing admin (created before v2) never got it, and `can_manage_approval_policy` / org-wide audit checks failed. **Fix:** added an `else` branch in `startup_event` that backfills the org-scoped owner assignment for an existing admin if it's missing (idempotent).
+
+### Root cause 3 — RBAC scope walk stopped short (`auth_service.py`)
+`resolve_role()` walked `document → folder → parent folders` and then **stopped at the root folder**, never checking the **org** scope. An org-scoped owner was therefore denied on per-document checks. **Fix:** when the folder walk reaches a root folder (no parent), fall through to the `org` scope before giving up. The walk is now `document → folder → parents → org`. Purely **additive** — it only grants org-admins access they should already have; the approval chain's exact `role_id == step.required_role_id` match is unaffected.
+
+### Bonus fix — folder delete blocked by soft-deleted docs (`folders.py`)
+`DELETE /api/folders/{id}` returned **400 "Cannot delete folder with children or documents"** even after every document in it was deleted, because `DELETE /api/documents/{id}` is a **soft delete** (`status="deleted"`, row kept) and the folder guard counted those rows. **Fix:** the `has_documents` guard now filters `status != "deleted"`, so a folder holding only soft-deleted docs can be removed.
+
+### Files changed
+| File | Change |
+|---|---|
+| `backend/app/main.py` | startup seed backfills org-scoped owner assignment for an existing admin |
+| `backend/app/services/auth_service.py` | `resolve_role` falls through to `org` scope after the folder hierarchy |
+| `backend/app/api/folders.py` | folder-delete check ignores soft-deleted (`status="deleted"`) documents |
+
+### Verification
+- All **8 existing test suites pass** unchanged (`test_flow`, `test_new_endpoints`, `test_person_a_endpoints`, `test_rbac_audit`, `test_governance`, `test_auth_tokens`, `test_stars_trash`, `test_approval_snapshot`).
+- A focused matrix of the 10 previously-broken endpoints (create/list/patch/attach/detach/status, plus 403-for-non-admin negative cases) passes end-to-end against live Postgres.
+- The two RBAC changes were impact-checked via the code graph: `resolve_role` feeds `authorize` → `require_permission` (32 endpoints) and the approval chain's direct calls; the change only widens org-admin access and removes none.
+
+> **Note for `main` after merge:** `main` has since advanced (migration `0005_role_perms` reworks role→permission seeds and removes the `suggester` role). When this branch merges, re-confirm the org-admin seed and the `ROLE_PERMISSIONS` map line up with `0005`.
 CHANGES ON 22/6
 ### Document Creation Logic Update
 - **Refactor:** `create_document` now supports root-level document creation (no folder required).
