@@ -50,7 +50,15 @@ async def resolve_role(db: AsyncSession, user_id, scope_type: str, scope_id) -> 
             if folder and folder.parent_folder_id:
                 current_scope_id = folder.parent_folder_id
             else:
-                break
+                # Reached root folder — fall back to org scope as final check.
+                # An org-scoped assignment is the ultimate authority for all
+                # documents and folders belonging to that org.
+                org_id = folder.org_id if folder else None
+                if org_id is not None:
+                    current_scope_type = "org"
+                    current_scope_id = org_id
+                else:
+                    break
         else:
             # "org" (or any non-hierarchical scope) is terminal — no walk.
             break
