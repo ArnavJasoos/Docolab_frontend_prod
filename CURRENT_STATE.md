@@ -323,3 +323,13 @@ Brief signatures so another chat has full context. Format: `METHOD path → hand
 **Tooling** — `scripts/seed-collab-test.mjs` (provisions a real doc + 2 users via the live API and prints a ready-to-use editor URL + JWTs).
 
 **Local config (gitignored, not committed):** `backend/.env`, `frontend/.env.local`, `hocuspocus-server/.env`.
+
+CHANGES ON 22/6
+### Document Creation Logic Update
+- **Refactor:** `create_document` now supports root-level document creation (no folder required).
+- **Changes:**
+  - Modified `Document` model to allow `folder_id` to be `Optional` (nullable).
+  - Updated `create_document` route to conditionally validate `folder_id`.
+  - Added organization-level permission check for root documents (`"organization"` scope).
+- **Previous Behavior:** Documents were strictly required to be inside a folder, causing `400 Bad Request` or `403 Forbidden` errors if no `folder_id` was provided or if the user lacked specific folder-level assignments.
+- **New Behavior:** System now supports both folder-scoped documents and root-level documents (scoped to the user's organization).
