@@ -100,7 +100,7 @@ Validated against the live Postgres (`docplatform`), then **left clean (empty da
 ### Still open
 1. **Document content persistence / live collab** — the editor's Plate content is **not** persisted via REST; it lives in Yjs/Hocuspocus (+ S3 cold-storage snapshots), which is the **Node server** that isn't built. This is the cold-storage snapshot workflow: the live Y.Doc (warm) is snapshotted to cold storage when idle; submit freezes a snapshot; approval advances the baseline. **Fix:** stand up the Hocuspocus/Yjs server (canonical) — `documents.yjs_state` and version `s3_key` are the backend hooks. (A stopgap `GET/PUT /documents/{id}/content` could persist Plate JSON to a column, but would duplicate the Yjs path — not recommended.)
 2. **Share links / "anyone with the link"** — frontend `collaborators.ts` models `generalAccess` + link roles; backend only has explicit `assignments`. **Fix:** a `share_links` table (token, document_id, role, expires_at) + endpoints, if link access is wanted.
-3. **Role vocabulary mismatch** — frontend uses `commenter`; backend uses `suggester`. Pick one mapping when wiring the share dialog.
+3. **Role vocabulary mismatch** — frontend uses `commenter`; backend roles are `owner/approver/editor/viewer` (the `suggester` role was removed). `commenter` has no exact backend role — map it to `viewer` (read-only) or `editor` when wiring the share dialog. See `RBAC.md`.
 4. **OAuth / SSO** — login page has Google/SSO buttons that are demo-only; no backend provider. Needs an OAuth integration (and likely an `identities` table) if real.
 5. **Tier-2 infra:** real S3 storage, content diff, export serializers, AI worker, notification push.
 6. **Doc sprawl:** several overlapping root docs (`ARCHITECTURE.md`, `PROJECT_STATUS.md`, `INTEGRATION_CHANGES.md`, `ONBOARDING.md`, `CHANGES_FROM_INITIAL_DESIGN.md`, the API-reference docs, this file). The API-reference docs predate the canonical-mount fix and the star/trash/resolve + governance + v2 auth/stars endpoints; consolidate to avoid drift.
@@ -175,7 +175,7 @@ Honest answer to "is editing / suggestions / versioning logged?":
 - Trash / restore / permanent delete → `PATCH {trashed}` / `DELETE`
 - **Suggestions** (Plate plugin) → `POST /documents/:id/suggestions` + `accept`/`reject`  ← required for "suggestions logged"
 - Comments / discussions → `/documents/:id/comments` (+ `resolve`)
-- Sharing / collaborators → `/assignments` + `/users` (reconcile `commenter`↔`suggester`)
+- Sharing / collaborators → `/assignments` + `/users` (reconcile FE `commenter` → BE `viewer`/`editor`; see `RBAC.md`)
 - Sessions → store `refresh_token`, refresh on 401, `signOut` → `POST /auth/logout`
 
 ### D. Frontend — needs the Node server first (Section B)
