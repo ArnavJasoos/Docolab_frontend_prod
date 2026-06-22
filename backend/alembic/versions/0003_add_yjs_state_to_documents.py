@@ -14,8 +14,8 @@ from alembic import op
 import sqlalchemy as sa
 from sqlalchemy.dialects.postgresql import BYTEA
 
-revision: str = "0003_add_yjs_state_to_documents"
-down_revision: str = "0002_add_starred_trashed_is_resolved"
+revision: str = "0003_yjs_state"
+down_revision: str = "0002_doc_flags"
 branch_labels = None
 depends_on = None
 

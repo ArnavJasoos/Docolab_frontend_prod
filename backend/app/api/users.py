@@ -6,6 +6,7 @@ from app.api.deps import get_current_user
 from app.models.database_models import User
 from app.schemas.auth import UserListResponse, UserListItem, UserUpdate, UserResponse
 from app.services.audit_service import record_audit, AuditAction
+from app.services.auth_service import is_org_admin
 
 router = APIRouter()
 
@@ -47,11 +48,10 @@ async def update_user(
 ):
     """Update user profile (name, avatar color, status).
 
-    RBAC: a user may edit ONLY their own profile. Editing another user requires
-    an org-admin capability, which the scoped (folder/document) role model does
-    not provide in v1 (every user owns their own root folder, so
-    `can_manage_members` is not an org-wide admin signal). Editing others is
-    therefore forbidden for now; a dedicated org-admin role is future work.
+    RBAC: a user may edit their OWN profile; editing another user (incl.
+    disabling via status) requires being an ORG ADMIN (an org-scoped role with
+    can_manage_members). Org-admin is an explicit org-scoped grant — it is NOT
+    inferred from folder/document ownership (see auth_service.is_org_admin).
     """
     user = (
         await db.execute(select(User).where(User.id == id, User.org_id == current_user.org_id))
@@ -59,18 +59,19 @@ async def update_user(
     if not user:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
 
-    if str(user.id) != str(current_user.id):
+    is_self = str(user.id) == str(current_user.id)
+    if not is_self and not await is_org_admin(db, current_user):
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
-            detail="You can only edit your own profile",
+            detail="Only the user themselves or an org admin may edit this profile",
         )
 
-    changed = {}
+    before, after = {}, {}
     if data.display_name is not None:
-        changed["display_name"] = data.display_name
+        before["display_name"] = user.display_name; after["display_name"] = data.display_name
         user.display_name = data.display_name
     if data.avatar_color is not None:
-        changed["avatar_color"] = data.avatar_color
+        before["avatar_color"] = user.avatar_color; after["avatar_color"] = data.avatar_color
         user.avatar_color = data.avatar_color
     if data.status is not None:
         if data.status not in ["active", "disabled"]:
@@ -78,13 +79,13 @@ async def update_user(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail="Status must be 'active' or 'disabled'"
             )
-        changed["status"] = data.status
+        before["status"] = user.status; after["status"] = data.status
         user.status = data.status
 
     record_audit(
         db, org_id=current_user.org_id, actor_id=current_user.id,
         action=AuditAction.USER_UPDATE, target_type="user",
-        target_id=user.id, meta={"changed": changed},
+        target_id=user.id, meta={"target_user": str(user.id), "before": before, "after": after},
     )
     await db.commit()
     await db.refresh(user)

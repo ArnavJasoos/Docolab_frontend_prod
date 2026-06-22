@@ -39,24 +39,29 @@ def signup(client, label):
         print(f"FATAL: signup failed ({r.status_code}): {r.text}")
         sys.exit(1)
     body = r.json()
-    return body["user"]["id"], body["token"]
+    return body["user"]["id"], body["token"], body["refresh_token"]
 
 
 def main():
     with httpx.Client(base_url=BASE, timeout=20.0) as client:
-        alice_id, alice_tok = signup(client, "alice")
-        bob_id, bob_tok = signup(client, "bob")
+        alice_id, alice_tok, alice_refresh = signup(client, "alice")
+        bob_id, bob_tok, _ = signup(client, "bob")
         A = {"Authorization": f"Bearer {alice_tok}"}
         B = {"Authorization": f"Bearer {bob_tok}"}
         print(f"[setup] alice={alice_id} bob={bob_id} (same org)")
 
-        # ---- Auth refresh / logout ----------------------------------------
+        # ---- Auth refresh / logout (real refresh-token store) -------------
         print("\n[Auth]")
-        r = client.post("/auth/refresh", json={"refresh_token": alice_tok})
+        r = client.post("/auth/refresh", json={"refresh_token": alice_refresh})
         check("refresh -> 200 + token", r.status_code == 200 and bool(r.json().get("token")), str(r.status_code))
+        rotated = r.json().get("refresh_token") if r.status_code == 200 else None
+        # rotation: the original refresh token is now revoked
+        r = client.post("/auth/refresh", json={"refresh_token": alice_refresh})
+        check("reusing rotated token -> 401", r.status_code == 401, str(r.status_code))
         r = client.post("/auth/refresh", json={"refresh_token": "garbage"})
         check("refresh bad token -> 401", r.status_code == 401, str(r.status_code))
-        r = client.post("/auth/logout", json={"refresh_token": alice_tok})
+        # logout revokes the (rotated) live token
+        r = client.post("/auth/logout", json={"refresh_token": rotated or alice_refresh})
         check("logout -> 200", r.status_code == 200, str(r.status_code))
 
         # ---- Alice creates a folder + document (becomes owner) ------------

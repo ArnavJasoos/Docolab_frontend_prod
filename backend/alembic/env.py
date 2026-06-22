@@ -30,7 +30,12 @@ import app.models.database_models           # noqa: E402, F401  (registers all m
 config = context.config
 
 if config.config_file_name is not None:
-    fileConfig(config.config_file_name)
+    # disable_existing_loggers=False is important: when migrations run IN-PROCESS
+    # at app startup (main.py auto-migrate), alembic's logging config must NOT
+    # disable uvicorn's loggers. Otherwise "Application startup complete." and
+    # "Uvicorn running on http://0.0.0.0:8000" never print after the migration
+    # lines, and the server LOOKS hung when it has actually finished starting.
+    fileConfig(config.config_file_name, disable_existing_loggers=False)
 
 # This is what enables `alembic revision --autogenerate` to diff your models
 # against the live DB and generate the migration for you automatically.
@@ -46,7 +51,7 @@ def _get_url() -> str:
         host     = os.environ.get("PGHOST",     "localhost")
         port     = os.environ.get("PGPORT",     "5432")
         user     = os.environ.get("PGUSER",     "postgres")
-        password = os.environ.get("PGPASSWORD", "postgres")
+        password = os.environ.get("PGPASSWORD", "root ")
         dbname   = os.environ.get("PGDATABASE", "docplatform")
         url = f"postgresql+asyncpg://{user}:{password}@{host}:{port}/{dbname}"
 
@@ -97,7 +102,16 @@ async def run_async_migrations() -> None:
 
 
 def run_migrations_online() -> None:
-    asyncio.run(run_async_migrations())
+    # When driven from application startup (main.py auto-migrate), the app
+    # passes its own already-open sync-wrapped connection via config.attributes
+    # so migrations run inside the app's event loop — no nested asyncio.run().
+    # When run from the CLI (`alembic upgrade head`), no connection is injected,
+    # so we spin up our own async engine.
+    connectable = context.config.attributes.get("connection", None)
+    if connectable is not None:
+        do_run_migrations(connectable)
+    else:
+        asyncio.run(run_async_migrations())
 
 
 if context.is_offline_mode():

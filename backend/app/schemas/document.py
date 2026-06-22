@@ -4,18 +4,19 @@ from pydantic import BaseModel
 from typing import Optional
 
 class DocumentCreate(BaseModel):
-    folder_id: str
+    folder_id: Optional[uuid.UUID] = None
     title: str
 
 class DocumentUpdate(BaseModel):
     title: Optional[str] = None
-    folder_id: Optional[str] = None
-    starred: Optional[bool] = None
+    folder_id: Optional[uuid.UUID] = None
+    # NOTE: no `starred` here — bookmarks are personal; use PUT/DELETE
+    # /documents/{id}/star instead. `trashed` is the reversible recycle bin.
     trashed: Optional[bool] = None
 
 class DocumentResponse(BaseModel):
     id: uuid.UUID
-    folder_id: uuid.UUID
+    folder_id: Optional[uuid.UUID] = None
     title: str
     status: str
     current_version_no: int
@@ -48,3 +49,7 @@ class AuthorizeCheckResponse(BaseModel):
     allowed: bool
     resolved_role: str | None
     via_scope: str | None
+
+class StarResponse(BaseModel):
+    document_id: uuid.UUID
+    starred: bool               # this user's personal bookmark state after the call

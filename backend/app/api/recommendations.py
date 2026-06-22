@@ -26,19 +26,10 @@ from app.schemas.recommendation import (
     RecommendationListResponse, RecommendationResponseCreate,
     RecommendationResponseOut, RecommendationResponseListResponse,
 )
-from app.services.auth_service import authorize
+from app.services.auth_service import require_permission
 from app.services.audit_service import record_audit, AuditAction
 
 router = APIRouter()
-
-
-async def _check_permission(db: AsyncSession, user_id, doc_id, permission: str):
-    has_perm, _, _ = await authorize(db, user_id, permission, "document", doc_id)
-    if not has_perm:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail=f"You do not have permission to {permission}",
-        )
 
 
 async def _get_version_or_404(db: AsyncSession, version_id, org_id) -> Version:
@@ -104,7 +95,7 @@ async def create_recommendation(
 ):
     """Create a recommendation on a version (accompanies an approve or reject)."""
     version = await _get_version_or_404(db, id, current_user.org_id)
-    await _check_permission(db, current_user.id, version.document_id, "can_give_final_approval")
+    await require_permission(db, current_user.id, "can_give_final_approval", "document", version.document_id)
 
     rec = Recommendation(
         org_id=current_user.org_id,
@@ -137,14 +128,15 @@ async def update_recommendation(
 ):
     """Update a recommendation's status (open / addressed / orphaned)."""
     rec = await _get_recommendation_or_404(db, id, current_user.org_id)
-    await _check_permission(db, current_user.id, rec.document_id, "can_give_final_approval")
+    await require_permission(db, current_user.id, "can_give_final_approval", "document", rec.document_id)
 
+    before_status = rec.status
     rec.status = data.status
     record_audit(
         db, org_id=current_user.org_id, actor_id=current_user.id,
         action=AuditAction.RECOMMENDATION_UPDATE, target_type="recommendation",
         target_id=rec.id, document_id=rec.document_id,
-        meta={"status": data.status},
+        meta={"before": {"status": before_status}, "after": {"status": data.status}},
     )
     await db.commit()
     await db.refresh(rec)
@@ -188,7 +180,7 @@ async def create_response(
     """Post a team response to a recommendation. APPEND-ONLY by design — there
     is intentionally no PATCH or DELETE on recommendation_responses."""
     rec = await _get_recommendation_or_404(db, id, current_user.org_id)
-    await _check_permission(db, current_user.id, rec.document_id, "can_suggest")
+    await require_permission(db, current_user.id, "can_suggest", "document", rec.document_id)
 
     response = RecommendationResponse(
         recommendation_id=rec.id,

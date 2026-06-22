@@ -1,9 +1,13 @@
 # app/main.py
+from pathlib import Path
+
+from alembic import command
+from alembic.config import Config
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy import select  # async queries
 from app.core.config import settings
-from app.core.database import Base, engine, SessionLocal
+from app.core.database import engine, SessionLocal
 from app.models.database_models import Role, RolePermission, User, Assignment, Folder
 from app.core.security import get_password_hash
 from app.api import auth, roles, folders, assignments, documents, users, versions, notifications, ai, export
@@ -11,6 +15,8 @@ from app.api import auth, roles, folders, assignments, documents, users, version
 from app.api import suggestions, comments, recommendations, audit
 # Ownership transfer (assignment-management helper, document-scoped)
 from app.api import ownership
+# Governance: dynamic approval policies (chains)
+from app.api import approval_policies
 
 app = FastAPI(title=settings.PROJECT_NAME)
 
@@ -58,6 +64,7 @@ app.include_router(comments.router, prefix=settings.API_STR, tags=["Comments"])
 app.include_router(recommendations.router, prefix=settings.API_STR, tags=["Recommendations"])
 app.include_router(audit.router, prefix=settings.API_STR, tags=["Audit"])
 app.include_router(ownership.router, prefix=settings.API_STR, tags=["Ownership"])
+app.include_router(approval_policies.router, prefix=settings.API_STR, tags=["Approval Policies"])
 
 
 # Role -> permission seed set for the single v1 org.
@@ -78,11 +85,29 @@ ROLE_PERMISSIONS = {
 }
 
 
+BACKEND_DIR = Path(__file__).resolve().parents[1]   # .../backend
+
+
+def _run_alembic_upgrade(sync_connection):
+    """Run `alembic upgrade head` using the app's own (sync-wrapped) connection.
+
+    Alembic is the SINGLE source of truth for schema — we no longer call
+    Base.metadata.create_all (which never ALTERs existing tables and silently
+    drifts from the migrations). env.py picks up this injected connection so
+    migrations run inside the app's event loop (no nested asyncio.run)."""
+    cfg = Config(str(BACKEND_DIR / "alembic.ini"))
+    cfg.attributes["connection"] = sync_connection
+    command.upgrade(cfg, "head")
+
+
 @app.on_event("startup")
 async def startup_event():
-    # 1. Create tables asynchronously
-    async with engine.begin() as conn:
-        await conn.run_sync(Base.metadata.create_all)
+    # 1. Bring the schema to head via Alembic (creates tables on a fresh DB,
+    #    applies pending migrations on an existing one). Set AUTO_MIGRATE=0 to
+    #    manage migrations manually (`alembic upgrade head`).
+    if settings.AUTO_MIGRATE:
+        async with engine.begin() as conn:
+            await conn.run_sync(_run_alembic_upgrade)
 
     # 2. Seed the single v1 org: roles + permissions, then an admin owner and a
     #    root folder. Guarded by existence checks so it runs only once.
@@ -133,6 +158,16 @@ async def startup_event():
                         role_id=owner_role.id,
                         scope_type="folder",
                         scope_id=root.id,
+                    ))
+                    # Org-scoped owner assignment => the admin is the org admin
+                    # (can manage members org-wide, manage approval policies,
+                    # and read the org-wide audit log).
+                    db.add(Assignment(
+                        org_id=org_id,
+                        user_id=admin.id,
+                        role_id=owner_role.id,
+                        scope_type="org",
+                        scope_id=org_id,
                     ))
                 await db.commit()
         except Exception as e:

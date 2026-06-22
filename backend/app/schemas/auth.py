@@ -40,7 +40,8 @@ class UserListResponse(BaseModel):
 
 class Token(BaseModel):
     user: UserResponse
-    token: str
+    token: str                  # short-lived JWT access token
+    refresh_token: str          # long-lived opaque refresh token (rotated)
 
 class LoginRequest(BaseModel):
     email: EmailStr
@@ -50,7 +51,8 @@ class RefreshRequest(BaseModel):
     refresh_token: str
 
 class RefreshResponse(BaseModel):
-    token: str
+    token: str                  # new access token
+    refresh_token: str          # new refresh token (rotation: the old one is now revoked)
     token_type: str = "bearer"
 
 class LogoutRequest(BaseModel):

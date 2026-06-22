@@ -115,9 +115,9 @@ async def update_folder(
     # RBAC: renaming/moving a folder requires edit rights on it.
     await require_permission(db, current_user.id, "can_edit_direct", "folder", id)
 
-    changed = {}
+    before, after = {}, {}
     if data.name is not None:
-        changed["name"] = data.name
+        before["name"] = folder.name; after["name"] = data.name
         folder.name = data.name
 
     if data.parent_folder_id is not None:
@@ -129,13 +129,14 @@ async def update_folder(
                 raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Parent folder not found")
             # Moving under a new parent also requires edit rights there.
             await require_permission(db, current_user.id, "can_edit_direct", "folder", data.parent_folder_id)
-        changed["parent_folder_id"] = str(data.parent_folder_id) if data.parent_folder_id else None
+        before["parent_folder_id"] = str(folder.parent_folder_id) if folder.parent_folder_id else None
+        after["parent_folder_id"] = str(data.parent_folder_id) if data.parent_folder_id else None
         folder.parent_folder_id = data.parent_folder_id
 
     record_audit(
         db, org_id=current_user.org_id, actor_id=current_user.id,
         action=AuditAction.FOLDER_UPDATE, target_type="folder",
-        target_id=folder.id, meta={"changed": changed},
+        target_id=folder.id, meta={"before": before, "after": after},
     )
     await db.commit()
     await db.refresh(folder)

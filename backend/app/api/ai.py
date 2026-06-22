@@ -9,20 +9,10 @@ from app.schemas.ai import (
     AISuggestRequest, AISuggestResponse, ApplyAIRecommendationRequest,
     ApplyAIRecommendationResponse, AIJobStatusResponse
 )
-from app.services.auth_service import authorize
+from app.services.auth_service import require_permission
 from app.services.audit_service import record_audit, AuditAction
 
 router = APIRouter()
-
-
-async def check_permission(db: AsyncSession, user_id, doc_id, permission: str):
-    """Helper to check permission and raise 403 if denied."""
-    has_perm, _, _ = await authorize(db, user_id, permission, "document", doc_id)
-    if not has_perm:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail=f"You do not have permission to {permission}"
-        )
 
 
 @router.post("/documents/{id}/ai/suggest", response_model=AISuggestResponse)
@@ -39,7 +29,7 @@ async def suggest_ai(
     if not doc:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Document not found")
 
-    await check_permission(db, current_user.id, doc.id, "can_suggest")
+    await require_permission(db, current_user.id, "can_suggest", "document", doc.id)
 
     # Enqueue AI job (placeholder - would integrate with job queue)
     job_id = str(uuid.uuid4())
@@ -71,7 +61,7 @@ async def apply_ai_recommendation(
     if not doc:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Document not found")
 
-    await check_permission(db, current_user.id, doc.id, "can_suggest")
+    await require_permission(db, current_user.id, "can_suggest", "document", doc.id)
 
     job_id = str(uuid.uuid4())
 

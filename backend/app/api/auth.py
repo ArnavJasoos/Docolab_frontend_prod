@@ -1,4 +1,3 @@
-import jwt
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -12,8 +11,12 @@ from app.schemas.auth import (
 )
 from app.api.deps import get_current_user
 from app.services.audit_service import record_audit, AuditAction
+from app.services.token_service import (
+    issue_refresh_token, rotate_refresh_token, revoke_refresh_token,
+)
 
 router = APIRouter()
+
 
 @router.post("/signup", response_model=Token, status_code=status.HTTP_201_CREATED)
 async def signup(data: UserCreate, db: AsyncSession = Depends(get_db)):
@@ -42,11 +45,12 @@ async def signup(data: UserCreate, db: AsyncSession = Depends(get_db)):
         action=AuditAction.USER_SIGNUP, target_type="user", target_id=user.id,
         meta={"email": user.email},
     )
+    token = create_access_token(subject=user.id)
+    refresh_token = issue_refresh_token(db, user)   # queued; committed below
     await db.commit()
     await db.refresh(user)
+    return {"user": user, "token": token, "refresh_token": refresh_token}
 
-    token = create_access_token(subject=user.id)
-    return {"user": user, "token": token}
 
 @router.post("/login", response_model=Token)
 async def login(data: LoginRequest, db: AsyncSession = Depends(get_db)):
@@ -60,40 +64,42 @@ async def login(data: LoginRequest, db: AsyncSession = Depends(get_db)):
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Inactive user account")
 
     token = create_access_token(subject=user.id)
-    return {"user": user, "token": token}
+    refresh_token = issue_refresh_token(db, user)
+    record_audit(
+        db, org_id=user.org_id, actor_id=user.id,
+        action=AuditAction.LOGIN, target_type="user", target_id=user.id,
+    )
+    await db.commit()
+    await db.refresh(user)
+    return {"user": user, "token": token, "refresh_token": refresh_token}
+
 
 @router.get("/me", response_model=UserResponse)
 async def get_me(current_user: User = Depends(get_current_user)):
     return current_user
 
+
 @router.post("/refresh", response_model=RefreshResponse)
-def refresh_token(data: RefreshRequest):
-    """DUMMY (JWT-only stub): mint a fresh access token from a supplied token.
-
-    The v1 18-table schema has no refresh-token store, so this validates the
-    supplied JWT's signature + subject and issues a new access token. Swap in a
-    real refresh-token store (persist/rotate/revoke) when one is added. No DB
-    access, so this stays a plain sync handler.
-    """
-    credentials_exception = HTTPException(
-        status_code=status.HTTP_401_UNAUTHORIZED,
-        detail="Invalid or expired refresh token",
-        headers={"WWW-Authenticate": "Bearer"},
+async def refresh_token(data: RefreshRequest, db: AsyncSession = Depends(get_db)):
+    """Exchange a valid refresh token for a NEW access token + a NEW refresh
+    token (rotation). The presented refresh token is revoked; reusing an
+    already-revoked token revokes the whole family (theft mitigation)."""
+    user, new_refresh = await rotate_refresh_token(db, data.refresh_token)
+    new_access = create_access_token(subject=user.id)
+    record_audit(
+        db, org_id=user.org_id, actor_id=user.id,
+        action=AuditAction.TOKEN_REFRESH, target_type="user", target_id=user.id,
     )
-    try:
-        payload = jwt.decode(data.refresh_token, settings.SECRET_KEY, algorithms=[settings.ALGORITHM])
-        user_id = payload.get("sub")
-        if user_id is None:
-            raise credentials_exception
-    except jwt.PyJWTError:
-        raise credentials_exception
+    await db.commit()
+    return {"token": new_access, "refresh_token": new_refresh, "token_type": "bearer"}
 
-    new_token = create_access_token(subject=user_id)
-    return {"token": new_token, "token_type": "bearer"}
 
 @router.post("/logout", response_model=LogoutResponse)
-def logout(data: LogoutRequest):
-    """DUMMY (JWT-only stub): no server-side refresh-token store exists in v1,
-    so logout just acknowledges; the client discards its stored tokens. Becomes
-    a real revoke once a refresh-token store is introduced."""
-    return {"success": True, "message": "Logged out"}
+async def logout(data: LogoutRequest, db: AsyncSession = Depends(get_db)):
+    """Revoke the supplied refresh token (real server-side logout). Idempotent —
+    an unknown/already-revoked token still returns success so clients can always
+    clear their state."""
+    revoked = await revoke_refresh_token(db, data.refresh_token)
+    await db.commit()
+    msg = "Logged out" if revoked else "Already logged out"
+    return {"success": True, "message": msg}

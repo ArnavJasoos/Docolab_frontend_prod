@@ -1,4 +1,4 @@
-# Docolab — Architecture, Design & Workflow
+git # Docolab — Architecture, Design & Workflow
 **Last updated:** 2026-06-18  
 **Active branch:** `feature/governance-integration-fixes`  
 **Schema migration:** `0002_add_starred_trashed_is_resolved` (current head)
@@ -15,9 +15,9 @@ version history, and a complete audit trail.
 ┌──────────────────────────────────────────────────────────────┐
 │  Browser — Next.js 16 + React 19                            │
 │  Plate (Slate.js) editor  ·  Document browser  ·  Auth UI   │
-├──────────────────────────────────────────────────────────────┤
+  ├──────────────────────────────────────────────────────────────┤
 │  Sync Layer — NOT YET BUILT                                 │
-│  Hocuspocus (Node.js WebSocket)  ·  Yjs CRDT               │
+│  Hocuspocus (Node.js WebSocket)  ·  Yjs CRDT             │
 ├──────────────────────────────────────────────────────────────┤
 │  REST API — FastAPI (Python 3.12)                           │
 │  JWT auth  ·  RBAC  ·  Approval  ·  Versions  ·  Export    │

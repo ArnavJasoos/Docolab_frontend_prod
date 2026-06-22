@@ -31,20 +31,10 @@ from app.schemas.suggestion import (
     SuggestionCreate, SuggestionOut, SuggestionListResponse,
     SuggestionResolveRequest, SuggestionResolveResponse,
 )
-from app.services.auth_service import authorize
+from app.services.auth_service import require_permission
 from app.services.audit_service import record_audit, AuditAction
 
 router = APIRouter()
-
-
-async def _check_permission(db: AsyncSession, user_id, doc_id, permission: str):
-    """Raise 403 unless the user holds `permission` on the document scope."""
-    has_perm, _, _ = await authorize(db, user_id, permission, "document", doc_id)
-    if not has_perm:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail=f"You do not have permission to {permission}",
-        )
 
 
 async def _get_document_or_404(db: AsyncSession, doc_id, org_id) -> Document:
@@ -97,7 +87,7 @@ async def create_suggestion(
     `origin` distinguishes them (origin='ai' => author_id is NULL)."""
     doc = await _get_document_or_404(db, id, current_user.org_id)
 
-    await _check_permission(db, current_user.id, doc.id, "can_suggest")
+    await require_permission(db, current_user.id, "can_suggest", "document", doc.id)
 
     suggestion = Suggestion(
         org_id=current_user.org_id,
@@ -147,8 +137,8 @@ async def accept_suggestion(
     """Accept a suggestion. Records governance + an edit_attribution row.
     (The client applies the actual Plate mark transform.)"""
     suggestion = await _get_suggestion_or_404(db, id, current_user.org_id)
-    await _check_permission(
-        db, current_user.id, suggestion.document_id, "can_resolve_suggestion"
+    await require_permission(
+        db, current_user.id, "can_resolve_suggestion", "document", suggestion.document_id
     )
 
     if suggestion.status != "pending":
@@ -198,8 +188,8 @@ async def reject_suggestion(
 ):
     """Reject a suggestion and record the reason. (Client removes the mark.)"""
     suggestion = await _get_suggestion_or_404(db, id, current_user.org_id)
-    await _check_permission(
-        db, current_user.id, suggestion.document_id, "can_resolve_suggestion"
+    await require_permission(
+        db, current_user.id, "can_resolve_suggestion", "document", suggestion.document_id
     )
 
     if suggestion.status != "pending":

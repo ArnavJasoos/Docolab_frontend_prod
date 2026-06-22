@@ -23,7 +23,7 @@ import sys
 import uuid
 import httpx
 
-BASE = "http://127.0.0.1:8041/api"
+BASE = "http://127.0.0.1:8000/api"
 RANDOM_ID = str(uuid.uuid4())
 _fail = []
 

@@ -20,7 +20,7 @@ from app.core.database import get_db
 from app.api.deps import get_current_user
 from app.models.database_models import User, Document, Comment, Suggestion
 from app.schemas.comment import CommentCreate, CommentOut, CommentListResponse, CommentResolve
-from app.services.auth_service import authorize
+from app.services.auth_service import authorize, require_permission
 from app.services.audit_service import record_audit, AuditAction
 
 router = APIRouter()
@@ -76,12 +76,7 @@ async def create_comment(
     doc = await _get_document_or_404(db, id, current_user.org_id)
 
     # Posting to the document's collaboration surface requires participation.
-    has_perm, _, _ = await authorize(db, current_user.id, "can_suggest", "document", doc.id)
-    if not has_perm:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="You do not have permission to can_suggest",
-        )
+    await require_permission(db, current_user.id, "can_suggest", "document", doc.id)
 
     # Validate optional foreign keys belong to the same document/org.
     if data.suggestion_id is not None:

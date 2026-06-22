@@ -22,13 +22,21 @@ class AuditAction:
     ROLE_CHANGE = "role_change"            # assignment created
     ROLE_REVOKE = "role_revoke"            # assignment removed
     OWNERSHIP_TRANSFER = "ownership_transfer"
+    # sessions (auth)
+    LOGIN = "login"
+    LOGOUT = "logout"
+    TOKEN_REFRESH = "token_refresh"
     # content
     FOLDER_CREATE = "folder_create"
     FOLDER_UPDATE = "folder_update"
     FOLDER_DELETE = "folder_delete"
     DOCUMENT_CREATE = "document_create"
     DOCUMENT_UPDATE = "document_update"
-    DOCUMENT_DELETE = "document_delete"
+    DOCUMENT_DELETE = "document_delete"    # permanent (status=deleted)
+    DOCUMENT_TRASH = "document_trash"      # reversible recycle-bin move
+    DOCUMENT_RESTORE = "document_restore"  # restore from recycle bin
+    DOCUMENT_STAR = "document_star"        # personal bookmark add
+    DOCUMENT_UNSTAR = "document_unstar"    # personal bookmark remove
     # collaboration (inner loop)
     SUGGESTION_CREATE = "suggestion_create"
     RESOLVE_SUGGESTION = "resolve_suggestion"
@@ -39,10 +47,15 @@ class AuditAction:
     RECOMMENDATION_RESPONSE = "recommendation_response"
     # governance (outer loop)
     SUBMIT = "submit"
-    APPROVE = "approve"
+    APPROVE = "approve"            # final approval (baseline advances)
+    APPROVE_STEP = "approve_step"  # one step of a multi-step chain completed
     REJECT = "reject"
     RESTORE = "restore"
     AI_APPLY = "ai_apply"
+    # approval policy administration
+    POLICY_CREATE = "policy_create"
+    POLICY_UPDATE = "policy_update"
+    POLICY_ATTACH = "policy_attach"   # attach/detach a policy to a document
 
 
 def record_audit(

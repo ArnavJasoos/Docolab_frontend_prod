@@ -25,17 +25,17 @@ import { getToken } from "@/lib/api/client";
 export function PlateEditor({ docId }: { docId: string }) {
   return (
     <DocumentProvider docId={docId}>
-      <Workspace />
+      <Workspace routeDocId={docId} />
     </DocumentProvider>
   );
 }
 
-function Workspace() {
+function Workspace({ routeDocId }: { routeDocId: string }) {
   const { doc, loading } = useDocument();
 
   if (loading || !doc) return <LoadingShell />;
   // Re-mount the Plate editor when the underlying document changes.
-  return <LoadedWorkspace key={doc.id} doc={doc} />;
+  return <LoadedWorkspace key={doc.id} doc={doc} routeDocId={routeDocId} />;
 }
 
 // Real-time collaboration (Yjs + Hocuspocus) requires the collab WebSocket
@@ -45,10 +45,12 @@ function Workspace() {
 // (and NEXT_PUBLIC_COLLAB_URL) once the Hocuspocus server is available.
 const COLLAB_ENABLED = process.env.NEXT_PUBLIC_COLLAB_ENABLED === "true";
 
-function LoadedWorkspace({ doc }: { doc: DocumentRecord }) {
+function LoadedWorkspace({ doc, routeDocId }: { doc: DocumentRecord; routeDocId: string }) {
   const token = getToken() ?? "";
-  // The editor is re-mounted per doc.id (key in <Workspace>), so building the
-  // plugin list once on mount is correct — docId/token never change in-place.
+  // The Hocuspocus room is the canonical document id from the route (the real
+  // backend UUID), NOT the local metadata record id — they coincide once the
+  // document store talks to the real API, but the route id is authoritative for
+  // collaboration so two clients on the same URL share a room.
   const editor = usePlateEditor({
     // With collab on, Yjs owns initialization (skip Plate's value seeding and
     // init the shared doc in the effect below). With collab off, seed normally
@@ -58,7 +60,7 @@ function LoadedWorkspace({ doc }: { doc: DocumentRecord }) {
     plugins: React.useMemo(
       () =>
         COLLAB_ENABLED
-          ? [...EditorKit, createYjsPlugin(doc.id, token)]
+          ? [...EditorKit, createYjsPlugin(routeDocId, token)]
           : EditorKit,
       // eslint-disable-next-line react-hooks/exhaustive-deps
       [],
@@ -74,7 +76,7 @@ function LoadedWorkspace({ doc }: { doc: DocumentRecord }) {
   React.useEffect(() => {
     if (!COLLAB_ENABLED) return;
     void editor.getApi(YjsPlugin).yjs.init({
-      id: doc.id,
+      id: routeDocId,
       value: doc.content,
       autoConnect: true,
     });

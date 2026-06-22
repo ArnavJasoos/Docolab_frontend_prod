@@ -13,11 +13,18 @@ layer but absent from the original schema:
 
 All three are non-nullable with a safe DEFAULT so the migration is zero-downtime:
 existing rows get false automatically; no data backfill required.
+
+NOTE on the revision id: Alembic's `alembic_version.version_num` column is
+VARCHAR(32). The original id ("0002_add_starred_trashed_is_resolved", 36 chars)
+overflowed it, so `alembic upgrade head` applied the DDL then failed writing the
+version row and rolled the whole transaction back — the DB looked untouched and
+stuck at 0001. The id is shortened to <=32 chars to fix this; the chain is
+otherwise unchanged.
 """
 from alembic import op
 import sqlalchemy as sa
 
-revision: str = "0002_add_starred_trashed_is_resolved"
+revision: str = "0002_doc_flags"
 down_revision: str = "0001_initial"
 branch_labels = None
 depends_on = None

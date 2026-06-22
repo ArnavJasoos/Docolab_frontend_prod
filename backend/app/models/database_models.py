@@ -184,15 +184,24 @@ class Document(Base):
 
     id:                 Mapped[uuid.UUID]        = mapped_column(UUID(as_uuid=True), primary_key=True, default=_uuid)
     org_id:             Mapped[uuid.UUID]        = mapped_column(UUID(as_uuid=True), nullable=False)
-    folder_id:          Mapped[uuid.UUID]        = mapped_column(UUID(as_uuid=True), ForeignKey("folders.id"), nullable=False)
+    folder_id: Mapped[Optional[uuid.UUID]] = mapped_column(
+            UUID(as_uuid=True), 
+            ForeignKey("folders.id"), 
+            nullable=True  # <--- CHANGE THIS
+        )
     title:              Mapped[str]              = mapped_column(Text, nullable=False)
     yjs_doc_key:        Mapped[str]              = mapped_column(Text, nullable=False)
     schema_version:     Mapped[int]              = mapped_column(Integer, nullable=False, server_default="1")
     status:             Mapped[str]              = mapped_column(Text, nullable=False, server_default="working")
     current_version_no: Mapped[int]              = mapped_column(Integer, nullable=False, server_default="0")
     offline_enabled:    Mapped[bool]             = mapped_column(Boolean, nullable=False, server_default="false")
-    starred:            Mapped[bool]             = mapped_column(Boolean, nullable=False, server_default="false")
+    # Recycle bin (reversible). `trashed` is the soft-move flag; `trashed_at`
+    # records when, so a future job can auto-purge old trash. Permanent removal
+    # is a separate, terminal state (status="deleted") set by DELETE.
     trashed:            Mapped[bool]             = mapped_column(Boolean, nullable=False, server_default="false")
+    trashed_at:         Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True))
+    # NOTE: there is intentionally no `starred` column — bookmarks are PERSONAL
+    # (per-user) and live in the document_stars table (see DocumentStar).
     yjs_state:          Mapped[Optional[bytes]]  = mapped_column(BYTEA, nullable=True)
     approval_policy_id: Mapped[Optional[uuid.UUID]] = mapped_column(UUID(as_uuid=True), ForeignKey("approval_policies.id"))
     created_by:         Mapped[uuid.UUID]        = mapped_column(UUID(as_uuid=True), ForeignKey("users.id"), nullable=False)
@@ -211,11 +220,34 @@ class Document(Base):
     approval_step_events: Mapped[list["ApprovalStepEvent"]] = relationship(back_populates="document", cascade="all, delete-orphan")
     recommendations:  Mapped[list["Recommendation"]]= relationship(back_populates="document", cascade="all, delete-orphan")
     audit_logs:       Mapped[list["AuditLog"]]       = relationship(back_populates="document")
+    stars:            Mapped[list["DocumentStar"]]   = relationship(back_populates="document", cascade="all, delete-orphan")
 
     __table_args__ = (
         Index("idx_documents_folder", "folder_id"),
         Index("idx_documents_policy", "approval_policy_id"),
         Index("idx_documents_org",    "org_id"),
+    )
+
+
+class DocumentStar(Base):
+    """
+    PERSONAL bookmark — one row per (user, document) that the user has starred.
+    Personal by design: one person starring a doc does NOT star it for everyone
+    (the old global documents.starred column did, which was the wrong semantics).
+    Starring needs only read access to the document, not edit rights.
+    Composite PK (user_id, document_id) makes star/unstar idempotent.
+    """
+    __tablename__ = "document_stars"
+
+    user_id:     Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), primary_key=True)
+    document_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("documents.id", ondelete="CASCADE"), primary_key=True)
+    org_id:      Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False)
+    created_at:  Mapped[datetime]  = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now())
+
+    document: Mapped["Document"] = relationship(back_populates="stars")
+
+    __table_args__ = (
+        Index("idx_document_stars_user", "user_id"),
     )
 
 
@@ -351,8 +383,13 @@ class Version(Base):
     org_id:           Mapped[uuid.UUID]      = mapped_column(UUID(as_uuid=True), nullable=False)
     document_id:      Mapped[uuid.UUID]      = mapped_column(UUID(as_uuid=True), ForeignKey("documents.id", ondelete="CASCADE"), nullable=False)
     version_no:       Mapped[int]            = mapped_column(Integer, nullable=False)
-    kind:             Mapped[str]            = mapped_column(Text, nullable=False)   # submission / approved
+    kind:             Mapped[str]            = mapped_column(Text, nullable=False)   # submission / approved / rejected
     s3_key:           Mapped[str]            = mapped_column(Text, nullable=False)
+    # Snapshot of the document's approval policy AT SUBMIT TIME. The approval
+    # chain is resolved against THIS, not documents.approval_policy_id, so that
+    # editing/detaching the policy mid-review cannot corrupt an in-flight
+    # submission. NULL = the submission uses the single owner gate.
+    approval_policy_id: Mapped[Optional[uuid.UUID]] = mapped_column(UUID(as_uuid=True), ForeignKey("approval_policies.id"))
     yjs_state_vector: Mapped[Optional[bytes]]= mapped_column(BYTEA)
     created_by:       Mapped[uuid.UUID]      = mapped_column(UUID(as_uuid=True), ForeignKey("users.id"), nullable=False)
     created_at:       Mapped[datetime]       = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now())
@@ -540,4 +577,37 @@ class AuditLog(Base):
 
     __table_args__ = (
         Index("idx_audit_document", "document_id"),
+    )
+
+
+# =============================================================================
+# GROUP F — Sessions (auth)
+# =============================================================================
+
+class RefreshToken(Base):
+    """
+    Server-side refresh-token store: turns logout/refresh from JWT-only stubs
+    into real, revocable sessions.
+
+    Security model:
+      - The raw token is an opaque random string handed to the client; we store
+        only its SHA-256 hash (token_hash), so a DB leak can't be replayed.
+      - Rotation: each /auth/refresh revokes the presented token and issues a
+        fresh one. Re-presenting an already-revoked token (reuse) signals theft
+        and triggers revocation of the whole user's token family.
+      - /auth/logout revokes the presented token.
+    """
+    __tablename__ = "refresh_tokens"
+
+    id:         Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=_uuid)
+    org_id:     Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False)
+    user_id:    Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
+    token_hash: Mapped[str]       = mapped_column(Text, nullable=False)
+    expires_at: Mapped[datetime]  = mapped_column(DateTime(timezone=True), nullable=False)
+    revoked:    Mapped[bool]      = mapped_column(Boolean, nullable=False, server_default="false")
+    created_at: Mapped[datetime]  = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now())
+
+    __table_args__ = (
+        UniqueConstraint("token_hash", name="uq_refresh_tokens_hash"),
+        Index("idx_refresh_tokens_user", "user_id"),
     )

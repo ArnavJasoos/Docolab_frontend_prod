@@ -138,13 +138,15 @@ def run_full_test():
         assert not any(a["user_id"] == bob_id for a in res.json()["assignments"]), "Bob assignment not revoked"
         print("  OK Bob's assignment revoked")
 
-        # 12. DELETE /documents/:id (soft delete)
+        # 12. DELETE /documents/:id (PERMANENT: status=deleted, gone for good)
         print("\n[12] DELETE /documents/:id")
         res = client.delete(f"{BASE_URL}/documents/{doc2_id}", headers=alice_headers)
         assert res.status_code == 204
+        # Permanent delete is terminal: the doc is no longer retrievable (404).
+        # (The reversible recycle bin is PATCH {"trashed": true}, not DELETE.)
         res = client.get(f"{BASE_URL}/documents/{doc2_id}", headers=alice_headers)
-        assert res.status_code == 200 and res.json()["status"] == "deleted"
-        print("  OK document soft-deleted")
+        assert res.status_code == 404, f"expected 404 after permanent delete, got {res.status_code}"
+        print("  OK document permanently deleted (404)")
 
         # 13. DELETE /folders/:id (empty only)
         print("\n[13] DELETE /folders/:id")

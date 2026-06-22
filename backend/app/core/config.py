@@ -18,7 +18,12 @@ class Settings(BaseSettings):
     
     SECRET_KEY: str = os.getenv("SECRET_KEY", "super-secret-development-key-change-in-production")
     ALGORITHM: str = "HS256"
-    ACCESS_TOKEN_EXPIRE_MINUTES: int = 60 * 24
+    ACCESS_TOKEN_EXPIRE_MINUTES: int = int(os.getenv("ACCESS_TOKEN_EXPIRE_MINUTES", str(60 * 24)))
+    # Long-lived, server-stored refresh tokens (rotated on every /auth/refresh).
+    REFRESH_TOKEN_EXPIRE_DAYS: int = int(os.getenv("REFRESH_TOKEN_EXPIRE_DAYS", "30"))
+    # Auto-run `alembic upgrade head` on startup (alembic is the single source of
+    # truth for schema; set AUTO_MIGRATE=0 to manage migrations manually).
+    AUTO_MIGRATE: bool = os.getenv("AUTO_MIGRATE", "1") not in ("0", "false", "False", "")
 
     # v1 is a single shared org (one team / tenant). Every signup joins this org.
     # org_id is the multi-tenant hook for the future; v1 just uses one fixed value.
