@@ -16,7 +16,7 @@ class DocumentUpdate(BaseModel):
 
 class DocumentResponse(BaseModel):
     id: uuid.UUID
-    folder_id: uuid.UUID
+    folder_id: Optional[uuid.UUID] = None
     title: str
     status: str
     current_version_no: int
