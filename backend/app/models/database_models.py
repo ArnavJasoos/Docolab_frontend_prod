@@ -85,7 +85,7 @@ class User(Base):
 
 class Role(Base):
     """
-    The fixed role set: owner / approver / editor / suggester / viewer.
+    The fixed role set: owner / approver / editor / viewer.
     UNIQUE (org_id, name) makes seed data idempotent.
     """
     __tablename__ = "roles"

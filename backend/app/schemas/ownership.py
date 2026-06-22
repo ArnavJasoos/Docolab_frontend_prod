@@ -9,7 +9,7 @@ class TransferOwnershipRequest(BaseModel):
     to_user_id: uuid.UUID
     # What role the current owner is demoted to (at the document scope) once
     # ownership moves. Must be a role that exists in the org.
-    demote_to: Literal["approver", "editor", "suggester", "viewer"] = "editor"
+    demote_to: Literal["approver", "editor", "viewer"] = "editor"
 
 
 class TransferOwnershipResponse(BaseModel):
