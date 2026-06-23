@@ -24,7 +24,7 @@ export function SideNav({ activeFilter = "all" }: { activeFilter?: DocFilter }) 
         </div>
         <div className="flex flex-col">
           <span className="font-ui-base text-ui-base font-semibold">Workspace</span>
-          <span className="font-ui-xs text-ui-xs text-text-muted">Enterprise Plan</span>
+          <span className="font-ui-xs text-ui-xs text-text-muted">All documents</span>
         </div>
       </div>
 

@@ -6,15 +6,7 @@ import { useRouter } from "next/navigation";
 import { toast } from "sonner";
 
 import { Icon } from "@/components/icon";
-import { cn } from "@/lib/utils";
 import * as auth from "@/lib/api/auth";
-
-const COLLAB = [
-  "https://lh3.googleusercontent.com/aida-public/AB6AXuB9c8Dnb41BFaG7-URjI0k1ruWOhfTLERPCEG37GgAKwIEp2O5uCws1DBtgSqTJE1x_mCftconp3GTGQxXZ3wVHGa2UagBwnMvzamlMDV2VucqhAtq3Hga-4ABoJ7_AY4wilaGcFMg9HZcMWLyuSIyk4K_Rr_Vsywf00D0cKR1VdKHErJNckhOT6EAdWtoheLVC4_Tasa5k4Zd70zmxXuP1T2sJtk7bw5VnvH_FcjTkgCsaoD86vUlpPX6AThots8DX6LNGGxqkt7E",
-  "https://lh3.googleusercontent.com/aida-public/AB6AXuBy7ebB__k-oF1b7_AVXEI3hkOlz1mI5w1Jt99aHJl3dGZ3zOhRAa-_VGrktex5TnGQOIwSG2sjLRZ67fV5sTl31lOPHeEIRClUVoZL1ZUNtHtP8AuxOatexObwwMNkxuDCZSC06LN2RXbAYCw1u4L4SF23eFvZJ_HfHwWlwsU4HzlBKYH8CxkhipWkqsfuYSJqs7C0OVidbt_BowrLcQ3XmPEoePf4B01RVZi4n94wMFNbbkKa1snwTj3iQ7d2jtQIqTjU2TKy258",
-  "https://lh3.googleusercontent.com/aida-public/AB6AXuDHD_tsGJVYieCkRxwIIsD_sYbLy9K7FJAr6iNphkrEe8hwgCaxjAVXEi2oRNqFAdM6eivfORX3KqWlS-6PBTQAMEqc0c7oNC6w66F9KlPl9XDO2mUOExiwz9pMFxqDrLMVudPGKtcUV8PzNz8Bbwv6yiGK67AZioYx8oNgxP_c_VgljPmn7i7c2Fs-Zl_AuSZ3hJPXlQCEZn63ik_5SfDCn8ql5AYsZ60n7FJKWo9A_PffvUpoKnh15LFm_HGRud75kmewNs7AwM4",
-  "https://lh3.googleusercontent.com/aida-public/AB6AXuBLRE34aKi6rce1pgfcS35UeH1gGGdOksXN3xlXGNpFO3P7DDoN_M0WfTTD06FOwmRRqsPWIjgn9h5jy1NjwzOmZYRvrHgb0qPl5XDX6-R1vyLhaeU0Lc-qUf4CXJIbYR19V9KTXNzI_yeoXaYdB8ADDk1f6_elXaofK2He71YV77oi4CuQpcRKiNmS5qoVnxInSvorAU_2De5HnHSVgO2CxOsUS4XSj20xb3Lce4YowIRZDVR4pDgpBo2ZS4LM0bTqNUBzDhS2pTs",
-];
 
 export default function LoginPage() {
   const router = useRouter();
@@ -22,7 +14,7 @@ export default function LoginPage() {
   const [password, setPassword] = React.useState("");
   const [showPassword, setShowPassword] = React.useState(false);
   const [remember, setRemember] = React.useState(false);
-  const [loading, setLoading] = React.useState<null | "form" | "google" | "sso">(null);
+  const [loading, setLoading] = React.useState<null | "form">(null);
   const [error, setError] = React.useState<string | null>(null);
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -39,18 +31,6 @@ export default function LoginPage() {
     } catch (err) {
       setError(err instanceof Error ? err.message : "Couldn't sign you in.");
     } finally {
-      setLoading(null);
-    }
-  };
-
-  const withProvider = async (provider: "google" | "sso") => {
-    setError(null);
-    setLoading(provider);
-    try {
-      await auth.signInWithProvider(provider);
-      router.push("/browser");
-    } catch {
-      setError("Couldn't sign in with that provider.");
       setLoading(null);
     }
   };
@@ -75,25 +55,18 @@ export default function LoginPage() {
             Secure, collaborative workspaces designed for high-performance teams
             to ideate, review, and finalize without friction.
           </p>
-          <div className="flex flex-col gap-md border-t border-border-strong pt-lg">
-            <p className="font-ui-sm text-ui-sm uppercase tracking-wider text-text-secondary">
-              Trusted by top teams
-            </p>
-            <div className="flex -space-x-4">
-              {COLLAB.map((src, i) => (
-                // eslint-disable-next-line @next/next/no-img-element
-                <img
-                  key={i}
-                  alt="Collaborator"
-                  className="size-10 rounded-full border-2 border-[#ECEEF2] bg-surface-bright object-cover"
-                  src={src}
-                />
-              ))}
-              <div className="flex size-10 items-center justify-center rounded-full border-2 border-[#ECEEF2] bg-surface-container font-ui-sm text-ui-sm text-text-secondary">
-                +8k
-              </div>
-            </div>
-          </div>
+          <ul className="flex flex-col gap-md border-t border-border-strong pt-lg">
+            {[
+              { icon: "groups", text: "Real-time multi-user editing" },
+              { icon: "history", text: "Versioning with review & approval" },
+              { icon: "lock", text: "Role-based access control" },
+            ].map((f) => (
+              <li key={f.icon} className="flex items-center gap-sm font-ui-base text-ui-base text-text-secondary">
+                <Icon name={f.icon} className="text-[20px] text-primary-container" />
+                {f.text}
+              </li>
+            ))}
+          </ul>
         </div>
         <div
           className="pointer-events-none absolute inset-0 opacity-10"
@@ -221,25 +194,13 @@ export default function LoginPage() {
               <div className="w-full border-t border-border-subtle" />
             </div>
             <div className="relative flex justify-center text-ui-sm">
-              <span className="bg-document-surface px-sm text-text-muted">Or continue with</span>
+              <span className="bg-document-surface px-sm text-text-muted">Single sign-on (coming soon)</span>
             </div>
           </div>
 
           <div className="mt-lg grid grid-cols-2 gap-sm">
-            <ProviderButton
-              icon="g_mobiledata"
-              label="Google"
-              loading={loading === "google"}
-              disabled={loading !== null}
-              onClick={() => void withProvider("google")}
-            />
-            <ProviderButton
-              icon="business_center"
-              label="SSO"
-              loading={loading === "sso"}
-              disabled={loading !== null}
-              onClick={() => void withProvider("sso")}
-            />
+            <ProviderButton icon="g_mobiledata" label="Google" />
+            <ProviderButton icon="business_center" label="SSO" />
           </div>
 
           <p className="mt-xl text-center font-ui-sm text-ui-sm text-text-secondary">
@@ -257,31 +218,17 @@ export default function LoginPage() {
   );
 }
 
-function ProviderButton({
-  icon,
-  label,
-  loading,
-  disabled,
-  onClick,
-}: {
-  icon: string;
-  label: string;
-  loading: boolean;
-  disabled: boolean;
-  onClick: () => void;
-}) {
+// SSO/OAuth is not implemented in the backend yet (email + password only), so
+// these providers render as disabled placeholders.
+function ProviderButton({ icon, label }: { icon: string; label: string }) {
   return (
     <button
       type="button"
-      onClick={onClick}
-      disabled={disabled}
-      className="flex h-[44px] w-full items-center justify-center rounded-lg border border-border-subtle bg-document-surface px-md font-ui-sm text-ui-sm font-medium text-text-primary shadow-sm transition-colors hover:bg-surface-container-low focus:outline-none focus:ring-2 focus:ring-border-subtle focus:ring-offset-2 disabled:opacity-60"
+      disabled
+      title="Coming soon"
+      className="flex h-[44px] w-full cursor-not-allowed items-center justify-center rounded-lg border border-border-subtle bg-document-surface px-md font-ui-sm text-ui-sm font-medium text-text-primary opacity-60 shadow-sm"
     >
-      <Icon
-        name={loading ? "progress_activity" : icon}
-        className={cn("mr-xs text-[18px]", loading && "animate-spin")}
-      />{" "}
-      {label}
+      <Icon name={icon} className="mr-xs text-[18px]" /> {label}
     </button>
   );
 }

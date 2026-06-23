@@ -1,7 +1,24 @@
-import type { TComment } from "@/components/ui/comment";
+// =============================================================================
+// lib/api/comments.ts — document discussions.
+//
+// Reads are backed by the FastAPI comments cluster:
+//   GET /documents/{id}/comments -> { comments: CommentOut[] }
+//
+// The Plate discussion plugin (discussion-kit.tsx) is initialised with the
+// EMPTY defaults below and hydrated per-document at runtime. No seeded users or
+// threads remain.
+//
+// NOTE: inline mutations are cached client-side via saveDiscussions() for now;
+// full write-through (POST /documents/{id}/comments, PATCH /comments/{id}/resolve)
+// is the remaining follow-up.
+// =============================================================================
 
+import type { Value } from "platejs";
+
+import type { TComment } from "@/components/ui/comment";
 import { latency, read, write } from "@/lib/api/db";
-import { CURRENT_USER, USERS } from "@/lib/api/seed";
+import { apiFetch } from "@/lib/api/client";
+import { getCurrentUser } from "@/lib/api/auth";
 
 export type TDiscussion = {
   id: string;
@@ -19,69 +36,58 @@ export type DiscussionUser = {
   hue?: number;
 };
 
-const avatar = (seed: string) =>
-  `https://api.dicebear.com/9.x/glass/svg?seed=${seed}`;
+/** Empty initial user map; hydrated at runtime from the backend roster. */
+export const USERS_MAP: Record<string, DiscussionUser> = {};
 
-/** Plugin-shaped user map keyed by id, derived from the shared roster. */
-export const USERS_MAP: Record<string, DiscussionUser> = Object.fromEntries(
-  USERS.map((u) => [
-    u.id,
-    { id: u.id, name: u.name, avatarUrl: u.avatarUrl ?? avatar(u.id) },
-  ]),
-);
+/** Current session user id (client-only; empty during SSR). */
+export const CURRENT_USER_ID =
+  typeof window !== "undefined" ? getCurrentUser()?.id ?? "" : "";
 
-export const CURRENT_USER_ID = CURRENT_USER.id;
-
-function p(text: string) {
-  return [{ type: "p", children: [{ text }] }];
-}
+/** No seeded threads — discussions are loaded per-document from the backend. */
+export const SEED_DISCUSSIONS: TDiscussion[] = [];
 
 const keyFor = (docId: string) => `discussions:${docId}`;
 
-export const SEED_DISCUSSIONS: TDiscussion[] = [
-  {
-    id: "discussion1",
-    userId: "sarah",
-    createdAt: new Date(Date.now() - 3_600_000),
-    isResolved: false,
-    documentContent: "paradigm shift in how we approach enterprise collaboration",
-    comments: [
-      {
-        id: "c1",
-        userId: "sarah",
-        discussionId: "discussion1",
-        contentRich: p("Can we quantify the 24% velocity claim with the source study?"),
-        createdAt: new Date(Date.now() - 3_600_000),
-        isEdited: false,
-      },
-      {
-        id: "c2",
-        userId: "you",
-        discussionId: "discussion1",
-        contentRich: p("Good call — I'll link the research appendix here."),
-        createdAt: new Date(Date.now() - 1_800_000),
-        isEdited: false,
-      },
-    ],
-  },
-  {
-    id: "discussion2",
-    userId: "marcus",
-    createdAt: new Date(Date.now() - 7_200_000),
-    isResolved: true,
-    documentContent: "single source of truth for product specifications",
-    comments: [
-      {
-        id: "c3",
-        userId: "marcus",
-        discussionId: "discussion2",
-        contentRich: p("Aligned. This matches the platform RFC we approved last week."),
-        createdAt: new Date(Date.now() - 7_200_000),
-        isEdited: false,
-      },
-    ],
-  },
-];
+// --- backend shape -----------------------------------------------------------
+interface CommentOut {
+  id: string;
+  document_id: string;
+  suggestion_id: string | null;
+  anchor: Record<string, unknown> | null;
+  author_id: string;
+  body: string;
+  is_resolved: boolean;
+  parent_comment_id: string | null;
+  created_at: string;
+}
+
+function richFromBody(body: string): Value {
+  return [{ type: "p", children: [{ text: body }] }];
+}
+
+/** Group flat backend comments into threaded discussions (root + replies). */
+function toDiscussions(comments: CommentOut[]): TDiscussion[] {
+  const roots = comments.filter((c) => !c.parent_comment_id);
+  return roots.map((root) => {
+    const thread = [root, ...comments.filter((c) => c.parent_comment_id === root.id)];
+    return {
+      id: root.id,
+      userId: root.author_id,
+      createdAt: new Date(root.created_at),
+      isResolved: root.is_resolved,
+      comments: thread.map(
+        (c): TComment => ({
+          id: c.id,
+          userId: c.author_id,
+          discussionId: root.id,
+          contentRich: richFromBody(c.body),
+          createdAt: new Date(c.created_at),
+          isEdited: false,
+        }),
+      ),
+    };
+  });
+}
 
 /** Revive Date fields that JSON round-tripping flattens to strings. */
 function reviveDates(discussions: TDiscussion[]): TDiscussion[] {
@@ -93,14 +99,22 @@ function reviveDates(discussions: TDiscussion[]): TDiscussion[] {
 }
 
 export async function getDiscussions(docId: string): Promise<TDiscussion[]> {
-  await latency(120);
-  const stored = read<TDiscussion[] | null>(keyFor(docId), null);
-  if (stored) return reviveDates(stored);
-  write(keyFor(docId), SEED_DISCUSSIONS);
-  return SEED_DISCUSSIONS;
+  try {
+    const data = await apiFetch<{ comments: CommentOut[] }>(
+      `/documents/${docId}/comments`,
+    );
+    const discussions = toDiscussions(data.comments);
+    write(keyFor(docId), discussions); // cache for transient client mutations
+    return discussions;
+  } catch {
+    // Backend unreachable — fall back to any client-cached discussions.
+    await latency(60);
+    const stored = read<TDiscussion[] | null>(keyFor(docId), null);
+    return stored ? reviveDates(stored) : [];
+  }
 }
 
-/** Persist the full discussion list. Called after inline/sidebar mutations. */
+/** Persist the full discussion list (transient client cache for now). */
 export async function saveDiscussions(
   docId: string,
   discussions: TDiscussion[],

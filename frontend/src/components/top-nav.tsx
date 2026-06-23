@@ -5,6 +5,7 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
 
+import type { User } from "@/lib/types";
 import { Icon } from "@/components/icon";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import {
@@ -15,8 +16,17 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-import { CURRENT_USER } from "@/lib/api/seed";
 import * as auth from "@/lib/api/auth";
+import * as notifications from "@/lib/api/notifications";
+
+const initials = (name: string) =>
+  name
+    .split(" ")
+    .map((p) => p[0])
+    .filter(Boolean)
+    .slice(0, 2)
+    .join("")
+    .toUpperCase() || "?";
 
 export function TopNav({
   search,
@@ -26,11 +36,33 @@ export function TopNav({
   onSearchChange?: (value: string) => void;
 }) {
   const router = useRouter();
+  // Seed from the cached session for an instant render, then confirm with /auth/me.
+  const [user, setUser] = React.useState<User | null>(() => auth.getCurrentUser());
+
+  React.useEffect(() => {
+    void auth.fetchCurrentUser().then((u) => {
+      if (u) setUser(u);
+    });
+  }, []);
 
   const signOut = async () => {
     await auth.signOut();
     toast.success("Signed out");
     router.push("/");
+  };
+
+  const checkNotifications = async () => {
+    try {
+      const items = await notifications.listNotifications(); // unread-only by default
+      const unread = items.length;
+      toast.info(
+        unread > 0
+          ? `You have ${unread} unread notification${unread === 1 ? "" : "s"}`
+          : "You're all caught up — no new notifications",
+      );
+    } catch {
+      toast.error("Couldn't load notifications");
+    }
   };
 
   return (
@@ -58,7 +90,7 @@ export function TopNav({
         </div>
 
         <button
-          onClick={() => toast.info("You're all caught up — no new notifications")}
+          onClick={() => void checkNotifications()}
           aria-label="Notifications"
           className="flex size-8 items-center justify-center rounded-full text-on-surface-variant transition-colors hover:bg-surface-container"
         >
@@ -71,19 +103,17 @@ export function TopNav({
             className="rounded-full outline-none focus-visible:ring-2 focus-visible:ring-primary-container"
           >
             <Avatar size="sm" className="border border-border-subtle">
-              {CURRENT_USER.avatarUrl && (
-                <AvatarImage src={CURRENT_USER.avatarUrl} alt={CURRENT_USER.name} />
-              )}
-              <AvatarFallback>Y</AvatarFallback>
+              {user?.avatarUrl && <AvatarImage src={user.avatarUrl} alt={user.name} />}
+              <AvatarFallback>{user ? initials(user.name) : "?"}</AvatarFallback>
             </Avatar>
           </DropdownMenuTrigger>
           <DropdownMenuContent align="end" className="min-w-56">
             <DropdownMenuLabel className="flex flex-col">
               <span className="font-ui-sm text-ui-sm font-semibold text-text-primary">
-                {CURRENT_USER.name}
+                {user?.name ?? "Account"}
               </span>
               <span className="font-ui-xs text-ui-xs font-normal text-text-muted">
-                {CURRENT_USER.email}
+                {user?.email ?? ""}
               </span>
             </DropdownMenuLabel>
             <DropdownMenuSeparator />

@@ -160,3 +160,44 @@ docs: <docs/comments only>
 | Change AI prompts | `frontend/src/app/api/ai/command/prompt/` |
 | Change RBAC permissions | `backend/app/main.py::ROLE_PERMISSIONS` |
 | Add collab feature | `hocuspocus-server/server.js` |
+
+## prod-frontend (demo → multi-user backend integration)
+
+Branch `prod-frontend`: the demo frontend was gutted of all placeholder/seed data
+and wired to the real FastAPI backend so everything a user sees comes from the
+backend. Online-first content (Yjs/Hocuspocus) with a REST fallback.
+
+**What changed**
+- `lib/api/seed.ts` — stripped to `HUES` (presence palette) + `blankContent()`.
+  Deleted `CURRENT_USER`, `USERS`, `SEED_DOCS`, seeded content, `userById`.
+- `lib/api/auth.ts` — removed `admin/admin` demo login + fake Google/SSO
+  (`signInWithProvider`). `login()` is email+password only. Added
+  `fetchCurrentUser()` → `GET /auth/me`.
+- `lib/api/documents.ts` — full `apiFetch` rewrite onto `/documents*` with a
+  backend→`DocSummary` adapter (status map, `version=v{current_version_no}`,
+  `ownerId=created_by`). `recent`/`shared` derived client-side; `duplicate` is
+  client-side create+copy; `toggleStar` reads state then `PUT/DELETE …/star`;
+  `collaboratorCount` kept in UI (defaults to 1, ready for an assignments count).
+- `lib/api/comments.ts` — backend-backed reads (`GET /documents/{id}/comments`,
+  flat→threaded). Empty `USERS_MAP`/`SEED_DISCUSSIONS`, real `CURRENT_USER_ID`.
+  Writes use a transient client cache (full write-through is a follow-up).
+- `lib/api/collaborators.ts` — sharing rebuilt on `assignments`/`roles`/`users`/
+  `ownership`. `generalAccess` is a client-only toggle (backend has no link
+  sharing); `getPresence()` returns the session user (Yjs awareness follow-up).
+- `top-nav.tsx` — real session user (cached + `/auth/me`); notifications button
+  hits `listNotifications()`. `side-nav.tsx` — dropped fake "Enterprise Plan".
+- `login/page.tsx` + `page.tsx` (signup) — removed hardcoded avatar URLs and
+  fake social proof; Google/SSO buttons disabled (no backend OAuth).
+- `lib/data.ts` — removed the `DOCS` demo array (kept `STATUS_CLASS`).
+
+**Decisions**: Google/SSO disabled (not deleted); `duplicate` client-side;
+`collaboratorCount` kept & wired; REST fallback built but online prioritized;
+MSW (`src/mocks/*`) kept but left disabled.
+
+**To run multi-user**: set `NEXT_PUBLIC_COLLAB_ENABLED=true` +
+`NEXT_PUBLIC_COLLAB_URL` (Hocuspocus) so editor content is Yjs-canonical.
+With collab off, the editor opens a blank REST-fallback doc (content not
+persisted over REST).
+
+**Follow-ups**: comments write-through (POST/PATCH), Yjs-awareness presence,
+deep Yjs content duplication, backend `updated_at` on the document list item.
