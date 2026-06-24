@@ -2,6 +2,7 @@
 
 import * as React from "react";
 import dynamic from "next/dynamic";
+import { toast } from "sonner";
 import { Plate, usePlateEditor } from "platejs/react";
 import { YjsPlugin } from "@platejs/yjs/react";
 
@@ -19,13 +20,15 @@ const CommentsPanel = dynamic(
   { ssr: false },
 );
 import { DocumentProvider, useDocument } from "@/lib/store/document-store";
-import { getDiscussions } from "@/lib/api/comments";
+import { AuthGuard } from "@/components/auth-guard";
 
 export function PlateEditor({ docId }: { docId: string }) {
   return (
-    <DocumentProvider docId={docId}>
-      <Workspace routeDocId={docId} />
-    </DocumentProvider>
+    <AuthGuard>
+      <DocumentProvider docId={docId}>
+        <Workspace routeDocId={docId} />
+      </DocumentProvider>
+    </AuthGuard>
   );
 }
 
@@ -64,8 +67,18 @@ function LoadedWorkspace({ doc, routeDocId }: { doc: DocumentRecord; routeDocId:
       [],
     ),
   });
-  const { docId, readOnly, commentsOpen, saveNow, onContentChange } =
-    useDocument();
+  const { readOnly, commentsOpen, saveNow, onContentChange } = useDocument();
+
+  // Online editing (Yjs/Hocuspocus) is the canonical, persisted path. When the
+  // collab server is unavailable the editor still opens, but edits are NOT
+  // persisted — warn the user instead of silently losing their work.
+  React.useEffect(() => {
+    if (!COLLAB_ENABLED) {
+      toast.warning("Offline mode — changes to this document won't be saved.", {
+        duration: 6000,
+      });
+    }
+  }, []);
 
   // Connect to Hocuspocus and seed the shared Y.Doc. On the very first connect
   // for a document (yjs_state is NULL server-side) the shared doc is empty, so

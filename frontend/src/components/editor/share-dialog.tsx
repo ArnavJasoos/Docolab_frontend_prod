@@ -21,6 +21,7 @@ import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Icon } from "@/components/icon";
 import { cn } from "@/lib/utils";
 import * as collaborators from "@/lib/api/collaborators";
+import { getCurrentUser } from "@/lib/api/auth";
 
 const ROLE_LABEL: Record<Role, string> = {
   owner: "Owner",
@@ -96,6 +97,7 @@ export function ShareDialog({
   const [inviting, setInviting] = React.useState(false);
   const [suggestions, setSuggestions] = React.useState<User[]>([]);
   const [showSuggestions, setShowSuggestions] = React.useState(false);
+  const meId = getCurrentUser()?.id;
 
   React.useEffect(() => {
     if (!open) return;
@@ -290,7 +292,7 @@ export function ShareDialog({
               <div className="min-w-0 flex-1">
                 <p className="truncate font-ui-sm text-ui-sm font-medium text-text-primary">
                   {user.name}
-                  {user.id === "you" && " (you)"}
+                  {user.id === meId && " (you)"}
                 </p>
                 <p className="truncate font-ui-xs text-ui-xs text-text-muted">
                   {user.email}

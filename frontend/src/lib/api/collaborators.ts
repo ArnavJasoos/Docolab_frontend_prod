@@ -1,3 +1,15 @@
+// =============================================================================
+// lib/api/collaborators.ts — document sharing built on the real backend
+// access-control endpoints (roles / assignments / users / ownership). No seeded
+// people remain.
+//
+// Notes / current limits:
+//   - The backend has no "anyone with the link" sharing, so generalAccess is a
+//     client-only toggle (not persisted) and defaults to "restricted".
+//   - Live presence is Yjs/Hocuspocus awareness; getPresence() returns the
+//     current session user for now (multi-user awareness is the follow-up).
+// =============================================================================
+
 import type {
   Collaborator,
   GeneralAccess,
@@ -6,104 +18,105 @@ import type {
   ShareState,
   User,
 } from "@/lib/types";
-import { latency, read, write } from "@/lib/api/db";
-import { CURRENT_USER, HUES, USERS } from "@/lib/api/seed";
+import type { UiRole } from "@/lib/roles";
+import { getCurrentUser } from "@/lib/api/auth";
+import * as assignments from "@/lib/api/assignments";
 
-const keyFor = (docId: string) => `share:${docId}`;
+// --- role vocabulary bridges -------------------------------------------------
+function roleToUi(role: Role): UiRole {
+  switch (role) {
+    case "owner":
+      return "Owner";
+    case "editor":
+    case "commenter":
+      return "Collaborator";
+    default:
+      return "Viewer";
+  }
+}
 
-function seedShare(docId: string): ShareState {
-  const others = USERS.filter((u) => u.id !== CURRENT_USER.id);
-  const collaborators: Collaborator[] = [
-    { user: CURRENT_USER, role: "owner" },
-    ...others.slice(0, 3).map((user, i): Collaborator => ({
-      user,
-      role: i === 0 ? "editor" : i === 1 ? "commenter" : "viewer",
-    })),
-  ];
+function backendNameToRole(name: string): Role {
+  switch (name) {
+    case "owner":
+      return "owner";
+    case "editor":
+    case "approver":
+      return "editor";
+    default:
+      return "viewer";
+  }
+}
+
+function orgUserToUser(u: assignments.OrgUser): User {
+  return { id: u.id, name: u.display_name, email: u.email };
+}
+
+// --- share state -------------------------------------------------------------
+export async function getShareState(docId: string): Promise<ShareState> {
+  const [entries, users] = await Promise.all([
+    assignments.listAssignments(docId),
+    assignments.listOrgUsers(),
+  ]);
+  const byId = new Map(users.map((u) => [u.id, u]));
+  const collaborators: Collaborator[] = entries.map((e) => {
+    const ou = byId.get(e.user_id);
+    const user: User = ou
+      ? orgUserToUser(ou)
+      : { id: e.user_id, name: "Unknown user", email: "" };
+    return { user, role: backendNameToRole(e.role_name) };
+  });
   return {
     collaborators,
     generalAccess: "restricted",
     linkRole: "viewer",
-    link: `https://docflow.app/d/${docId}`,
+    link: typeof window !== "undefined" ? window.location.href : "",
   };
 }
 
-function load(docId: string): ShareState {
-  const existing = read<ShareState | null>(keyFor(docId), null);
-  if (existing) return existing;
-  const seeded = seedShare(docId);
-  write(keyFor(docId), seeded);
-  return seeded;
-}
-
-export async function getShareState(docId: string): Promise<ShareState> {
-  await latency(120);
-  return load(docId);
-}
-
-function findUserByEmail(email: string): User | undefined {
-  return USERS.find((u) => u.email.toLowerCase() === email.toLowerCase());
-}
-
-/**
- * Roster typeahead for the share dialog. Returns known org members matching
- * `query` (by name or email) who are not already collaborators on the doc, so
- * the owner picks people by name and the backend receives a real user id.
- */
-export async function searchUsers(
-  docId: string,
-  query: string,
-): Promise<User[]> {
-  await latency(60);
-  const taken = new Set(load(docId).collaborators.map((c) => c.user.id));
+/** Roster typeahead: org members not already on the doc, minus the current user. */
+export async function searchUsers(docId: string, query: string): Promise<User[]> {
+  const [entries, users] = await Promise.all([
+    assignments.listAssignments(docId),
+    assignments.listOrgUsers(),
+  ]);
+  const taken = new Set(entries.map((e) => e.user_id));
+  const me = getCurrentUser()?.id;
   const q = query.trim().toLowerCase();
-  return USERS.filter((u) => !taken.has(u.id)).filter(
-    (u) =>
-      !q ||
-      u.name.toLowerCase().includes(q) ||
-      u.email.toLowerCase().includes(q),
-  ).slice(0, 6);
+  return users
+    .filter((u) => !taken.has(u.id) && u.id !== me)
+    .filter(
+      (u) =>
+        !q ||
+        u.display_name.toLowerCase().includes(q) ||
+        u.email.toLowerCase().includes(q),
+    )
+    .map(orgUserToUser)
+    .slice(0, 6);
 }
 
-/** Invite an already-known roster user by id (name flows to the backend). */
+/** Invite a known roster user by id. */
 export async function inviteUser(
   docId: string,
   user: User,
   role: Role,
 ): Promise<ShareState> {
-  await latency(140);
-  const state = load(docId);
-  const without = state.collaborators.filter((c) => c.user.id !== user.id);
-  const next: ShareState = {
-    ...state,
-    collaborators: [...without, { user, role }],
-  };
-  write(keyFor(docId), next);
-  return next;
+  await assignments.assignRole(docId, user.id, roleToUi(role));
+  return getShareState(docId);
 }
 
+/** Invite by email — the user must already be an org member (no external invites). */
 export async function inviteCollaborator(
   docId: string,
   email: string,
   role: Role,
 ): Promise<ShareState> {
-  await latency();
-  const state = load(docId);
-  const existing = findUserByEmail(email);
-  const name = email.split("@")[0].replace(/[._-]/g, " ");
-  const user: User = existing ?? {
-    id: email.toLowerCase(),
-    name: name.charAt(0).toUpperCase() + name.slice(1),
-    email,
-    hue: HUES[state.collaborators.length % HUES.length],
-  };
-  const without = state.collaborators.filter((c) => c.user.id !== user.id);
-  const next: ShareState = {
-    ...state,
-    collaborators: [...without, { user, role }],
-  };
-  write(keyFor(docId), next);
-  return next;
+  const users = await assignments.listOrgUsers();
+  const match = users.find((u) => u.email.toLowerCase() === email.toLowerCase());
+  if (!match) {
+    throw new Error("No organization member with that email.");
+  }
+  await assignments.assignRole(docId, match.id, roleToUi(role));
+  return getShareState(docId);
 }
 
 export async function updateCollaboratorRole(
@@ -111,64 +124,41 @@ export async function updateCollaboratorRole(
   userId: string,
   role: Role,
 ): Promise<ShareState> {
-  await latency(100);
-  const state = load(docId);
-  const next: ShareState = {
-    ...state,
-    collaborators: state.collaborators.map((c) =>
-      c.user.id === userId ? { ...c, role } : c,
-    ),
-  };
-  write(keyFor(docId), next);
-  return next;
+  const entries = await assignments.listAssignments(docId);
+  const current = entries.find((e) => e.user_id === userId);
+  if (current) {
+    await assignments.changeRole(docId, userId, current.id, roleToUi(role));
+  }
+  return getShareState(docId);
 }
 
 export async function removeCollaborator(
   docId: string,
   userId: string,
 ): Promise<ShareState> {
-  await latency(100);
-  const state = load(docId);
-  const next: ShareState = {
-    ...state,
-    collaborators: state.collaborators.filter((c) => c.user.id !== userId),
-  };
-  write(keyFor(docId), next);
-  return next;
+  const entries = await assignments.listAssignments(docId);
+  const current = entries.find((e) => e.user_id === userId);
+  if (current) await assignments.revokeAssignment(current.id);
+  return getShareState(docId);
 }
 
+/** Client-only general-access toggle (backend has no link sharing yet). */
 export async function setGeneralAccess(
   docId: string,
   generalAccess: GeneralAccess,
   linkRole?: Role,
 ): Promise<ShareState> {
-  await latency(100);
-  const state = load(docId);
-  const next: ShareState = {
-    ...state,
-    generalAccess,
-    linkRole: linkRole ?? state.linkRole,
-  };
-  write(keyFor(docId), next);
-  return next;
+  const state = await getShareState(docId);
+  return { ...state, generalAccess, linkRole: linkRole ?? state.linkRole };
 }
 
 /**
- * Live presence. Backend swaps this for a realtime channel (e.g. Supabase
- * Realtime / Yjs awareness); the UI only depends on the returned shape.
+ * Live presence. The canonical source is Yjs/Hocuspocus awareness; until that
+ * is wired into this hook, return the current session user as active.
  */
 export async function getPresence(docId: string): Promise<PresenceUser[]> {
-  await latency(80);
-  const { collaborators } = load(docId);
-  const active = collaborators
-    .filter((c) => c.user.id !== CURRENT_USER.id)
-    .slice(0, 3);
-  return [
-    { ...CURRENT_USER, hue: CURRENT_USER.hue ?? "violet", state: "active" },
-    ...active.map((c, i): PresenceUser => ({
-      ...c.user,
-      hue: c.user.hue ?? HUES[i % HUES.length],
-      state: i === active.length - 1 ? "idle" : "active",
-    })),
-  ];
+  void docId;
+  const me = getCurrentUser();
+  if (!me) return [];
+  return [{ ...me, hue: me.hue ?? "violet", state: "active" }];
 }

@@ -10,6 +10,7 @@ import type { DocFilter, DocStatus, DocSummary, SortKey } from "@/lib/types";
 import { STATUS_CLASS } from "@/lib/data";
 import { SideNav } from "@/components/side-nav";
 import { TopNav } from "@/components/top-nav";
+import { AuthGuard } from "@/components/auth-guard";
 import { Icon } from "@/components/icon";
 import {
   DropdownMenu,
@@ -343,8 +344,10 @@ function EmptyState({ filter, query }: { filter: DocFilter; query: string }) {
 
 export default function BrowserPage() {
   return (
-    <Suspense>
-      <BrowserContent />
-    </Suspense>
+    <AuthGuard>
+      <Suspense>
+        <BrowserContent />
+      </Suspense>
+    </AuthGuard>
   );
 }

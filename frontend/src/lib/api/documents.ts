@@ -1,66 +1,105 @@
+// =============================================================================
+// lib/api/documents.ts — real backend integration (FastAPI /documents cluster).
+//
+//   POST   /documents            {title, folder_id}     -> DocumentResponse
+//   GET    /documents            ?trashed&starred        -> {documents:[…]}
+//   GET    /documents/{id}                               -> DocumentResponse
+//   PATCH  /documents/{id}       {title?, trashed?}       -> DocumentResponse
+//   DELETE /documents/{id}                               -> 204
+//   PUT    /documents/{id}/star  /  DELETE …/star         -> StarResponse
+//
+// Document CONTENT is NOT carried over REST: it is Yjs/Hocuspocus-canonical
+// (online-first). getDocument() returns metadata + a blank body; the editor
+// hydrates the real content from the Yjs room (or starts blank as the REST
+// fallback when the collab server is unreachable). See plate-editor.tsx.
+// =============================================================================
+
 import type { Value } from "platejs";
 
 import type {
   DocFilter,
+  DocStatus,
   DocSummary,
   DocumentRecord,
   SortKey,
 } from "@/lib/types";
-import { latency, read, uid, write } from "@/lib/api/db";
-import { CURRENT_USER, SEED_DOCS } from "@/lib/api/seed";
 import { apiFetch } from "@/lib/api/client";
+import { blankContent } from "@/lib/api/seed";
+import { getCurrentUser } from "@/lib/api/auth";
 
-const KEY = "docs";
-
-/** A genuinely blank document body — a single empty paragraph. */
-function blankContent(): Value {
-  return [{ type: "p", children: [{ text: "" }] }];
+// --- backend response shapes -------------------------------------------------
+interface BackendDoc {
+  id: string;
+  folder_id: string | null;
+  title: string;
+  status: string;
+  current_version_no: number;
+  yjs_doc_key?: string;
+  starred: boolean;
+  trashed: boolean;
+  created_by: string;
+  created_at?: string;
+  updated_at?: string;
 }
 
-/**
- * Best-effort backend exposure of a new document.
- * Maps to POST /documents (FastAPI). Non-blocking: the localStorage record is
- * the source of truth in this mock layer, so a 401 (no auth) or offline backend
- * never blocks creation. Swap localStorage for this response once auth is wired.
- */
-async function createDocumentRemote(doc: DocumentRecord): Promise<void> {
-  try {
-    await apiFetch("/documents", {
-      method: "POST",
-      body: JSON.stringify({ title: doc.title, folder_id: null }),
-    });
-  } catch {
-    /* backend not reachable / unauthenticated — stay local-only for now */
+// The list endpoint returns a lighter item without timestamps.
+type BackendDocListItem = Pick<
+  BackendDoc,
+  "id" | "title" | "status" | "current_version_no" | "starred" | "trashed" | "created_by"
+>;
+
+// --- adapters (backend -> frontend) ------------------------------------------
+function mapStatus(s: string): DocStatus {
+  switch (s) {
+    case "working":
+      return "Working";
+    case "pending_approval":
+      return "Pending Review";
+    case "approved":
+      return "Approved";
+    case "draft":
+      return "Draft";
+    default:
+      return "Draft";
   }
-}
-
-function loadAll(): DocumentRecord[] {
-  const existing = read<DocumentRecord[] | null>(KEY, null);
-  if (existing && existing.length) return existing;
-  write(KEY, SEED_DOCS);
-  return SEED_DOCS;
-}
-
-function persistAll(docs: DocumentRecord[]): void {
-  write(KEY, docs);
-}
-
-function toSummary(doc: DocumentRecord): DocSummary {
-  // Strip heavy content for list views.
-  const { content: _content, ...summary } = doc;
-  void _content;
-  return summary;
 }
 
 function relativeLabel(iso: string): string {
   const diff = Date.now() - new Date(iso).getTime();
+  if (Number.isNaN(diff)) return "recently";
   const min = Math.round(diff / 60_000);
-  if (min < 1) return "just now by You";
-  if (min < 60) return `${min}m ago by You`;
+  if (min < 1) return "just now";
+  if (min < 60) return `${min}m ago`;
   const hr = Math.round(min / 60);
-  if (hr < 24) return `${hr}h ago by You`;
+  if (hr < 24) return `${hr}h ago`;
   const day = Math.round(hr / 24);
-  return day === 1 ? "yesterday" : `${day}d ago by You`;
+  return day === 1 ? "yesterday" : `${day}d ago`;
+}
+
+/**
+ * Map a backend document onto the browser summary. `collaboratorCount` is kept
+ * in the UI and defaults to 1 (owner); once the backend exposes a per-document
+ * member count (assignments), pass it through here — the wiring is ready.
+ */
+function toSummary(d: BackendDoc | BackendDocListItem, collaboratorCount = 1): DocSummary {
+  const full = d as BackendDoc;
+  return {
+    id: d.id,
+    title: d.title,
+    status: mapStatus(d.status),
+    version: `v${d.current_version_no ?? 0}`,
+    updatedAt: full.updated_at ?? "",
+    updatedLabel: full.updated_at ? relativeLabel(full.updated_at) : "recently",
+    ownerId: d.created_by,
+    starred: d.starred,
+    trashed: d.trashed,
+    collaboratorCount,
+  };
+}
+
+function toRecord(d: BackendDoc): DocumentRecord {
+  // Content is Yjs-canonical; the editor hydrates it from the collab room.
+  return { ...toSummary(d), content: blankContent() };
 }
 
 const STATUS_ORDER: Record<string, number> = {
@@ -70,22 +109,29 @@ const STATUS_ORDER: Record<string, number> = {
   Draft: 3,
 };
 
+// --- public API --------------------------------------------------------------
 export async function listDocuments(opts?: {
   filter?: DocFilter;
   sort?: SortKey;
   query?: string;
 }): Promise<DocSummary[]> {
-  await latency(120);
   const { filter = "all", sort = "updated", query = "" } = opts ?? {};
-  let docs = loadAll();
 
-  docs = docs.filter((d) => {
-    if (filter === "trash") return d.trashed;
-    if (d.trashed) return false;
-    if (filter === "starred") return d.starred;
-    if (filter === "shared") return d.ownerId !== CURRENT_USER.id;
-    return true;
-  });
+  const params = new URLSearchParams();
+  if (filter === "starred") params.set("starred", "true");
+  if (filter === "trash") params.set("trashed", "true");
+  const qs = params.toString();
+
+  const data = await apiFetch<{ documents: BackendDocListItem[] }>(
+    `/documents${qs ? `?${qs}` : ""}`,
+  );
+  let docs = data.documents.map((d) => toSummary(d));
+
+  // "shared" / "recent" have no dedicated backend filter — derive client-side.
+  if (filter === "shared") {
+    const me = getCurrentUser()?.id;
+    docs = docs.filter((d) => d.ownerId !== me);
+  }
 
   const q = query.trim().toLowerCase();
   if (q) docs = docs.filter((d) => d.title.toLowerCase().includes(q));
@@ -98,96 +144,63 @@ export async function listDocuments(opts?: {
   });
 
   if (filter === "recent") docs = docs.slice(0, 6);
-
-  return docs.map(toSummary);
+  return docs;
 }
 
 export async function getDocument(id: string): Promise<DocumentRecord | null> {
-  await latency();
-  return loadAll().find((d) => d.id === id) ?? null;
+  try {
+    const d = await apiFetch<BackendDoc>(`/documents/${id}`);
+    return toRecord(d);
+  } catch {
+    return null;
+  }
 }
 
 export async function createDocument(title = "Untitled document"): Promise<DocumentRecord> {
-  await latency();
-  const docs = loadAll();
-  const doc: DocumentRecord = {
-    id: uid("doc"),
-    title,
-    status: "Draft",
-    version: "v0.1",
-    updatedAt: new Date().toISOString(),
-    updatedLabel: "just now by You",
-    ownerId: CURRENT_USER.id,
-    starred: false,
-    trashed: false,
-    collaboratorCount: 1,
-    content: blankContent(),
-  };
-  persistAll([doc, ...docs]);
-  // Expose the creation to the backend (best-effort; see note above).
-  void createDocumentRemote(doc);
-  return doc;
+  const d = await apiFetch<BackendDoc>("/documents", {
+    method: "POST",
+    body: JSON.stringify({ title, folder_id: null }),
+  });
+  return toRecord(d);
 }
 
 export async function updateDocument(
   id: string,
   patch: { title?: string; content?: Value; status?: DocumentRecord["status"] },
 ): Promise<DocSummary> {
-  await latency(160);
-  const docs = loadAll();
-  const idx = docs.findIndex((d) => d.id === id);
-  if (idx === -1) throw new Error(`Document ${id} not found`);
-  const updated: DocumentRecord = {
-    ...docs[idx],
-    ...patch,
-    updatedAt: new Date().toISOString(),
-    updatedLabel: relativeLabel(new Date().toISOString()),
-  };
-  docs[idx] = updated;
-  persistAll(docs);
-  return toSummary(updated);
+  // The backend PATCH only accepts title/folder_id/trashed. `content` is owned
+  // by Yjs and `status` transitions go through the approval flow, so neither is
+  // sent here — only the title is persisted via this call.
+  const d = await apiFetch<BackendDoc>(`/documents/${id}`, {
+    method: "PATCH",
+    body: JSON.stringify({ title: patch.title }),
+  });
+  return toSummary(d);
 }
 
 export async function duplicateDocument(id: string): Promise<DocumentRecord> {
-  await latency();
-  const docs = loadAll();
-  const src = docs.find((d) => d.id === id);
-  if (!src) throw new Error(`Document ${id} not found`);
-  const copy: DocumentRecord = {
-    ...src,
-    id: uid("doc"),
-    title: `${src.title} (copy)`,
-    ownerId: CURRENT_USER.id,
-    starred: false,
-    trashed: false,
-    updatedAt: new Date().toISOString(),
-    updatedLabel: "just now by You",
-  };
-  persistAll([copy, ...docs]);
-  return copy;
+  // No backend duplicate endpoint — create a new document client-side carrying
+  // the source title. (Deep content copy across Yjs rooms is a follow-up.)
+  const src = await apiFetch<BackendDoc>(`/documents/${id}`);
+  return createDocument(`${src.title} (copy)`);
 }
 
 export async function setTrashed(id: string, trashed: boolean): Promise<void> {
-  await latency(140);
-  const docs = loadAll();
-  const idx = docs.findIndex((d) => d.id === id);
-  if (idx === -1) return;
-  docs[idx] = { ...docs[idx], trashed };
-  persistAll(docs);
+  await apiFetch(`/documents/${id}`, {
+    method: "PATCH",
+    body: JSON.stringify({ trashed }),
+  });
 }
 
 export async function toggleStar(id: string): Promise<boolean> {
-  await latency(80);
-  const docs = loadAll();
-  const idx = docs.findIndex((d) => d.id === id);
-  if (idx === -1) return false;
-  const starred = !docs[idx].starred;
-  docs[idx] = { ...docs[idx], starred };
-  persistAll(docs);
-  return starred;
+  // The backend star endpoints are idempotent (not toggles), so read the
+  // current state first, then flip it.
+  const d = await apiFetch<BackendDoc>(`/documents/${id}`);
+  const next = !d.starred;
+  await apiFetch(`/documents/${id}/star`, { method: next ? "PUT" : "DELETE" });
+  return next;
 }
 
 export async function deleteForever(id: string): Promise<void> {
-  await latency();
-  persistAll(loadAll().filter((d) => d.id !== id));
+  await apiFetch(`/documents/${id}`, { method: "DELETE" });
 }

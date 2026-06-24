@@ -9,6 +9,7 @@ import { DocMenubar } from "@/components/editor/doc-menubar";
 import { DocTitle, SaveStatus } from "@/components/editor/doc-title";
 import { PresenceStack } from "@/components/editor/presence-stack";
 import { DocOverflowMenu } from "@/components/editor/doc-overflow-menu";
+import { RoleActions, RoleBadge } from "@/components/editor/role-actions";
 import { cn } from "@/lib/utils";
 import { useDocument } from "@/lib/store/document-store";
 
@@ -92,6 +93,8 @@ export function EditorTopBar() {
       </div>
 
       <div className="flex shrink-0 items-center gap-2">
+        <RoleBadge />
+        <RoleActions />
         <div className="hidden sm:block">
           <PresenceStack docId={docId} onOpenShare={() => setShareOpen(true)} />
         </div>

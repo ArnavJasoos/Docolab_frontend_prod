@@ -15,6 +15,7 @@ import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover
 import { Icon } from "@/components/icon";
 import { cn } from "@/lib/utils";
 import { usePresence } from "@/lib/hooks/use-presence";
+import { getCurrentUser } from "@/lib/api/auth";
 
 const HUE_RING: Record<PresenceHue, string> = {
   violet: "ring-presence-violet",
@@ -47,7 +48,7 @@ function initials(name: string) {
     .toUpperCase();
 }
 
-function PresenceAvatar({ user }: { user: PresenceUser }) {
+function PresenceAvatar({ user, meId }: { user: PresenceUser; meId?: string }) {
   return (
     <Tooltip>
       <TooltipTrigger asChild>
@@ -67,7 +68,7 @@ function PresenceAvatar({ user }: { user: PresenceUser }) {
       </TooltipTrigger>
       <TooltipContent>
         {user.name}
-        {user.id === "you" && " (you)"}
+        {user.id === meId && " (you)"}
         <span className="text-background/60">
           {" · "}
           {user.state === "active" ? "Active now" : "Idle"}
@@ -87,6 +88,7 @@ export function PresenceStack({
   onOpenShare?: () => void;
 }) {
   const users = usePresence(docId);
+  const meId = getCurrentUser()?.id;
   if (!users.length) return null;
 
   const shown = users.slice(0, max);
@@ -101,7 +103,7 @@ export function PresenceStack({
       >
         <AvatarGroup data-size="sm">
           {shown.map((u) => (
-            <PresenceAvatar key={u.id} user={u} />
+            <PresenceAvatar key={u.id} user={u} meId={meId} />
           ))}
           {overflow > 0 && (
             <AvatarGroupCount className="size-6 text-ui-xs font-semibold">
@@ -139,7 +141,7 @@ export function PresenceStack({
               <div className="min-w-0 flex-1">
                 <p className="truncate font-ui-sm text-ui-sm font-medium text-text-primary">
                   {u.name}
-                  {u.id === "you" && " (you)"}
+                  {u.id === meId && " (you)"}
                 </p>
                 <p className="font-ui-xs text-ui-xs text-text-muted">
                   {u.state === "active" ? "Editing now" : "Idle"}

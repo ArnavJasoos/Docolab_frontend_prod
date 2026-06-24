@@ -6,14 +6,7 @@ import { useRouter } from "next/navigation";
 import { toast } from "sonner";
 
 import { Icon } from "@/components/icon";
-import { cn } from "@/lib/utils";
 import * as auth from "@/lib/api/auth";
-
-const COLLAB = [
-  "https://lh3.googleusercontent.com/aida-public/AB6AXuAVPaKN526TeF2fiBb3p4vRHibpIlJWw2S3_Sk1wZSSB3LXNYI0c3ccVa0XBNDV4NQZ4OmaE_IndDKjh6fH_q0DdzNy-37E-bN7j7u8n1a3NUJXRnPv0kUU4GRLQLxfup_26FPIE4vum-omMPINPdJT-5-hfG_IIm02ykLqoLgIElidKb-HPLTidte_XF8OK6a-zIq0AsaqYGQ9eZ2q-mLXKx8zY1xzDw5V9RvTs68DcIBh8VyiYmNVSRocSNRpS5a6h2OVlNDy42o",
-  "https://lh3.googleusercontent.com/aida-public/AB6AXuDcUv-YSgC_pRBsQGFymBWRFXQTqbBByKwseKh7mrXrlkuO4k5YCDVWW7MglTW4hn6sPyLiyCSNzPGodVaBSApgVfZhNuy3Pfer8TxSU14UItDIjPwNDTGHeLXTkPLVUspeRxIbKdpPT8l2abptWlH-jVM4DtOR8JrvclaBLOrZnNUXK_Hwo89L4ELtHzMq4PxGKbu8gFLidNXugGirQhCEgJ6fAHrjJaAt0SrcuqD28LpfGk3dwd3H6MKtyCEiMjiHYTyYmRhZJ0w",
-  "https://lh3.googleusercontent.com/aida-public/AB6AXuA_oB9j4UOulXBtFjQDnh9PehIiV0U38w3F06WBur-Y2A-bP0yx2UjX4hkgvKaDKpOvVbSnL5c_trHbgBcjaF5fShm-lksaI8dHnst52i77c56d6z89Exw4yqCRmqYYQqrfpkoIaS9JJ8-GzGcg4UMwspQEbRz5HeSdz_HpKF19oU2ZlFDt74IAgoplgEYTXOYyU9jXZ3G8EibHjB4dtypayYRHNnZxZnmx0rZ3bJeLQlkPHlUtYDwVkf6KyOTyCif3zAjpg0ZGFck",
-];
 
 export default function SignUpPage() {
   const router = useRouter();
@@ -22,7 +15,7 @@ export default function SignUpPage() {
   const [password, setPassword] = React.useState("");
   const [showPassword, setShowPassword] = React.useState(false);
   const [agreed, setAgreed] = React.useState(false);
-  const [loading, setLoading] = React.useState<null | "form" | "google" | "sso">(null);
+  const [loading, setLoading] = React.useState<null | "form">(null);
   const [error, setError] = React.useState<string | null>(null);
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -45,18 +38,6 @@ export default function SignUpPage() {
     }
   };
 
-  const withProvider = async (provider: "google" | "sso") => {
-    setError(null);
-    setLoading(provider);
-    try {
-      await auth.signInWithProvider(provider);
-      router.push("/browser");
-    } catch {
-      setError("Couldn't sign in with that provider.");
-      setLoading(null);
-    }
-  };
-
   return (
     <div className="flex h-full w-full overflow-hidden bg-app-bg text-on-surface">
       {/* Left: branding */}
@@ -75,20 +56,18 @@ export default function SignUpPage() {
             Professional collaborative environments where precision, trust, and
             high-information density are paramount.
           </p>
-          <div className="mt-xl flex -space-x-4">
-            {COLLAB.map((src, i) => (
-              // eslint-disable-next-line @next/next/no-img-element
-              <img
-                key={i}
-                alt="Collaborator"
-                className="size-12 rounded-full border-2 border-[#ECEEF2] bg-surface-bright object-cover"
-                src={src}
-              />
+          <ul className="mt-xl flex flex-col gap-md">
+            {[
+              { icon: "groups", text: "Real-time multi-user editing" },
+              { icon: "history", text: "Versioning with review & approval" },
+              { icon: "lock", text: "Role-based access control" },
+            ].map((f) => (
+              <li key={f.icon} className="flex items-center gap-sm font-ui-base text-ui-base text-text-secondary">
+                <Icon name={f.icon} className="text-[20px] text-primary-container" />
+                {f.text}
+              </li>
             ))}
-            <div className="flex size-12 items-center justify-center rounded-full border-2 border-[#ECEEF2] bg-surface-container-high font-ui-sm text-ui-sm font-medium text-on-surface-variant">
-              +5
-            </div>
-          </div>
+          </ul>
         </div>
         <div className="pointer-events-none absolute bottom-0 right-0 translate-x-1/3 translate-y-1/3 opacity-10">
           <Icon name="description" className="text-[400px] text-primary" />
@@ -220,24 +199,12 @@ export default function SignUpPage() {
               <div className="w-full border-t border-border-subtle" />
             </div>
             <div className="relative flex justify-center text-ui-sm">
-              <span className="bg-document-surface px-sm text-text-muted">Or continue with</span>
+              <span className="bg-document-surface px-sm text-text-muted">Single sign-on (coming soon)</span>
             </div>
           </div>
           <div className="mt-lg grid grid-cols-2 gap-sm">
-            <ProviderButton
-              icon="g_mobiledata"
-              label="Google"
-              loading={loading === "google"}
-              disabled={loading !== null}
-              onClick={() => void withProvider("google")}
-            />
-            <ProviderButton
-              icon="business_center"
-              label="SSO"
-              loading={loading === "sso"}
-              disabled={loading !== null}
-              onClick={() => void withProvider("sso")}
-            />
+            <ProviderButton icon="g_mobiledata" label="Google" />
+            <ProviderButton icon="business_center" label="SSO" />
           </div>
         </div>
       </div>
@@ -245,31 +212,17 @@ export default function SignUpPage() {
   );
 }
 
-function ProviderButton({
-  icon,
-  label,
-  loading,
-  disabled,
-  onClick,
-}: {
-  icon: string;
-  label: string;
-  loading: boolean;
-  disabled: boolean;
-  onClick: () => void;
-}) {
+// SSO/OAuth is not implemented in the backend yet (email + password only), so
+// these providers render as disabled placeholders.
+function ProviderButton({ icon, label }: { icon: string; label: string }) {
   return (
     <button
       type="button"
-      onClick={onClick}
-      disabled={disabled}
-      className="flex w-full justify-center rounded-lg border border-border-subtle bg-surface-bright px-md py-sm font-ui-sm text-ui-sm font-medium text-text-primary transition-colors hover:bg-surface-container-low focus:outline-none focus:ring-2 focus:ring-border-subtle focus:ring-offset-2 disabled:opacity-60"
+      disabled
+      title="Coming soon"
+      className="flex w-full cursor-not-allowed justify-center rounded-lg border border-border-subtle bg-surface-bright px-md py-sm font-ui-sm text-ui-sm font-medium text-text-primary opacity-60"
     >
-      <Icon
-        name={loading ? "progress_activity" : icon}
-        className={cn("mr-xs text-[18px]", loading && "animate-spin")}
-      />{" "}
-      {label}
+      <Icon name={icon} className="mr-xs text-[18px]" /> {label}
     </button>
   );
 }
