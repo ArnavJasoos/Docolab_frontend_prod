@@ -4,7 +4,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.config import settings
 from app.core.database import get_db
 from app.core.security import get_password_hash, verify_password, create_access_token
-from app.models.database_models import User
+from app.models.database_models import User, Role, Assignment
 from app.schemas.auth import (
     UserCreate, Token, LoginRequest, UserResponse,
     RefreshRequest, RefreshResponse, LogoutRequest, LogoutResponse,
@@ -44,6 +44,24 @@ async def signup(data: UserCreate, db: AsyncSession = Depends(get_db)):
     )
     db.add(user)
     await db.flush()
+
+    # v1: every new user lands in the shared org with edit rights so they can
+    # create root documents immediately (no org/folder setup required). RBAC is
+    # preserved — this is an org-scoped `editor` assignment, not a bypass.
+    editor_role = (
+        await db.execute(
+            select(Role).where(Role.org_id == user.org_id, Role.name == "editor")
+        )
+    ).scalars().first()
+    if editor_role:
+        db.add(Assignment(
+            org_id=user.org_id,
+            user_id=user.id,
+            role_id=editor_role.id,
+            scope_type="org",
+            scope_id=user.org_id,
+        ))
+
     record_audit(
         db, org_id=user.org_id, actor_id=user.id,
         action=AuditAction.USER_SIGNUP, target_type="user", target_id=user.id,

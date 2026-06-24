@@ -92,6 +92,10 @@ export function DocumentProvider({
   const timer = React.useRef<ReturnType<typeof setTimeout> | null>(null);
   const idRef = React.useRef(docId);
   const loadedRef = React.useRef(false);
+  // Caches the in-flight "create blank doc" request, keyed by docId. React 18
+  // StrictMode runs effects twice in dev; without this both runs fire their own
+  // POST /documents and two blank docs are created. Sharing one promise → one POST.
+  const createPromiseRef = React.useRef<{ key: string; promise: Promise<DocumentRecord> } | null>(null);
 
   // Load (or lazily create) the document for this id.
   React.useEffect(() => {
@@ -99,9 +103,20 @@ export function DocumentProvider({
     loadedRef.current = false;
     (async () => {
       setLoading(true);
-      let record = await documentsApi.getDocument(docId);
+      // "new" (or empty) is the sentinel for "no doc yet" — don't hit the
+      // backend with it (the id isn't a UUID → 500). Create straight away.
+      const isNew = !docId || docId === "new";
+      let record = isNew ? null : await documentsApi.getDocument(docId);
       if (!record) {
-        record = await documentsApi.createDocument("Untitled document");
+        // Reuse the in-flight create for this docId so StrictMode's double
+        // effect run issues a single POST instead of two blank documents.
+        if (createPromiseRef.current?.key !== docId) {
+          createPromiseRef.current = {
+            key: docId,
+            promise: documentsApi.createDocument("Untitled document"),
+          };
+        }
+        record = await createPromiseRef.current.promise;
         // Pin the freshly created doc to the URL so a refresh reopens it
         // instead of spawning yet another blank document.
         if (typeof window !== "undefined") {
@@ -131,6 +146,8 @@ export function DocumentProvider({
   // (folder inheritance included) via the backend authorize-check.
   React.useEffect(() => {
     let cancelled = false;
+    // Wait for a real (created) doc id before asking the backend for access.
+    if (!resolvedId || resolvedId === "new") return;
     void getMyAccess(resolvedId)
       .then((a) => {
         if (!cancelled) setResolvedRole(a.backendRole);

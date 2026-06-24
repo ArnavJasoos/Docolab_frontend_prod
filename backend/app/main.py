@@ -198,6 +198,41 @@ async def startup_event():
                             scope_id=org_id,
                         ))
                         await db.commit()
+
+            # Backfill: every user without an org-scoped assignment gets the
+            # `editor` role on the shared org, so existing accounts (created
+            # before signup granted this) can also create root documents.
+            editor_role = (
+                await db.execute(
+                    select(Role).where(Role.org_id == org_id, Role.name == "editor")
+                )
+            ).scalars().first()
+            if editor_role:
+                users = (
+                    await db.execute(select(User).where(User.org_id == org_id))
+                ).scalars().all()
+                granted = False
+                for u in users:
+                    has_org_assignment = (
+                        await db.execute(
+                            select(Assignment).where(
+                                Assignment.user_id == u.id,
+                                Assignment.scope_type == "org",
+                                Assignment.scope_id == org_id,
+                            )
+                        )
+                    ).scalars().first()
+                    if has_org_assignment is None:
+                        db.add(Assignment(
+                            org_id=org_id,
+                            user_id=u.id,
+                            role_id=editor_role.id,
+                            scope_type="org",
+                            scope_id=org_id,
+                        ))
+                        granted = True
+                if granted:
+                    await db.commit()
         except Exception as e:
             await db.rollback()
             raise e

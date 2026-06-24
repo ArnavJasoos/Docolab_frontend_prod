@@ -75,20 +75,36 @@ async def create_document(
         await require_permission(db, current_user.id, "can_edit_direct", "folder", data.folder_id)
         scope_type = "folder"
         scope_id = data.folder_id
+        effective_folder_id = data.folder_id
     else:
         # User wants to create at Root level
         # RBAC: check if they have permission to create at the Organization level
         # (Assuming you use the Org ID as the scope for root documents)
-        await require_permission(db, current_user.id, "can_edit_direct", "organization", current_user.org_id)
-        scope_type = "organization"
+        await require_permission(db, current_user.id, "can_edit_direct", "org", current_user.org_id)
+        scope_type = "org"
         scope_id = current_user.org_id
+        # documents.folder_id is NOT NULL in the DB, so root-level docs are parked
+        # in the org's root folder (placeholder). Pick the earliest top-level folder.
+        root_folder = (
+            await db.execute(
+                select(Folder)
+                .where(Folder.org_id == current_user.org_id, Folder.parent_folder_id.is_(None))
+                .order_by(Folder.created_at)
+            )
+        ).scalars().first()
+        if root_folder is None:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="No root folder exists for this org to hold the document",
+            )
+        effective_folder_id = root_folder.id
 
     # 2. Create Document
     doc_id = uuid.uuid4()
     doc = Document(
         id=doc_id,
         org_id=current_user.org_id,
-        folder_id=data.folder_id, # Can be None now
+        folder_id=effective_folder_id,
         title=data.title,
         yjs_doc_key=str(doc_id),
         schema_version=1,
@@ -154,6 +170,10 @@ async def list_documents(
 @router.get("/{id}", response_model=DocumentResponse)
 async def get_document(id: str, db: AsyncSession = Depends(get_db), current_user: User = Depends(get_current_user)):
     """Get a single document by ID"""
+    try:
+        uuid.UUID(id)
+    except ValueError:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Document not found")
     doc = (
         await db.execute(select(Document).where(Document.id == id, Document.org_id == current_user.org_id))
     ).scalars().first()
@@ -321,6 +341,10 @@ async def unstar_document(id: str, db: AsyncSession = Depends(get_db), current_u
 
 @router.get("/{id}/authorize-check", response_model=AuthorizeCheckResponse)
 async def check_authorization(id: str, permission: str = Query(...), db: AsyncSession = Depends(get_db), current_user: User = Depends(get_current_user)):
+    try:
+        uuid.UUID(id)
+    except ValueError:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Document not found")
     doc = (
         await db.execute(select(Document).where(Document.id == id))
     ).scalars().first()
