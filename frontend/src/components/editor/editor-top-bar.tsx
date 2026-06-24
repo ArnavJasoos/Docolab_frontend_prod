@@ -44,6 +44,7 @@ export function EditorTopBar() {
     setShareOpen,
     versionsOpen,
     setVersionsOpen,
+    caps,
   } = useDocument();
 
   // Snapshot id being compared against the current version (full-screen overlay).
@@ -113,13 +114,15 @@ export function EditorTopBar() {
           <Icon name="forum" fill={commentsOpen} size={20} />
         </button>
 
-        <button
-          onClick={() => setShareOpen(true)}
-          className="flex items-center gap-1.5 rounded-md bg-primary-container px-4 py-1.5 font-ui-sm text-ui-sm font-semibold text-on-primary shadow-sm transition-colors hover:bg-accent-hover"
-        >
-          <Icon name="group_add" size={18} />
-          <span className="hidden sm:inline">Share</span>
-        </button>
+        {caps.canManageMembers && (
+          <button
+            onClick={() => setShareOpen(true)}
+            className="flex items-center gap-1.5 rounded-md bg-primary-container px-4 py-1.5 font-ui-sm text-ui-sm font-semibold text-on-primary shadow-sm transition-colors hover:bg-accent-hover"
+          >
+            <Icon name="group_add" size={18} />
+            <span className="hidden sm:inline">Share</span>
+          </button>
+        )}
 
         <DocOverflowMenu />
       </div>

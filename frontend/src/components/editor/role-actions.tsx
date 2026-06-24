@@ -35,14 +35,28 @@ const ROLE_ICON: Record<UiRole, string> = {
 
 const ALL_ROLES: UiRole[] = ["Owner", "Manager", "Collaborator", "Viewer"];
 
+// Rank for bounding the preview switcher: you can only preview a role at or
+// below your own (downgrade), never above it (which would be client-side
+// privilege escalation — the store clamps caps too, this just hides the option).
+const UI_RANK: Record<UiRole, number> = {
+  Viewer: 0,
+  Collaborator: 1,
+  Manager: 2,
+  Owner: 3,
+};
+
 /**
  * Role pill that doubles as a "preview as role" switcher. The switcher is a
  * demo/standalone affordance: with no live backend everyone resolves to Owner,
  * so this lets you see each custom view (and the approval flow) for real.
  */
 export function RoleBadge() {
-  const { uiRole, previewRole, setPreviewRole } = useDocument();
+  const { uiRole, realUiRole, previewRole, setPreviewRole } = useDocument();
   if (!uiRole) return null;
+  // Only offer roles at or below the user's real role (downgrade-only preview).
+  const selectableRoles = realUiRole
+    ? ALL_ROLES.filter((r) => UI_RANK[r] <= UI_RANK[realUiRole])
+    : [];
   return (
     <DropdownMenu>
       <DropdownMenuTrigger
@@ -60,7 +74,7 @@ export function RoleBadge() {
         <DropdownMenuLabel className="font-ui-xs text-ui-xs text-text-muted">
           Preview as role
         </DropdownMenuLabel>
-        {ALL_ROLES.map((r) => (
+        {selectableRoles.map((r) => (
           <DropdownMenuItem key={r} onSelect={() => setPreviewRole(r)}>
             <Icon name={ROLE_ICON[r]} size={16} className="text-text-muted" />
             <span className="flex-1">{r}</span>

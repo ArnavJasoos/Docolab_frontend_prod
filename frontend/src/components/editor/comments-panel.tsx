@@ -88,6 +88,7 @@ function DiscussionCard({
   onAiApprove: () => void;
   onAiReject: () => void;
 }) {
+  const { caps } = useDocument();
   const [draft, setDraft] = React.useState("");
 
   const send = () => {
@@ -185,7 +186,7 @@ function DiscussionCard({
         )}
       </div>
 
-      {!discussion.isResolved && (
+      {!discussion.isResolved && caps.canComment && (
         <div className="mt-2 flex items-center gap-2 border-t border-border-subtle pt-2">
           <Avatar size="sm">
             {users[currentUserId]?.avatarUrl && (

@@ -38,6 +38,9 @@ interface DocumentContextValue {
   caps: Caps;
   /** UI role label for the signed-in user on this doc (null = no access yet). */
   uiRole: UiRole | null;
+  /** The user's REAL role (ignores preview). Used to bound the preview switcher
+   *  so it can only downgrade, never escalate. */
+  realUiRole: UiRole | null;
   /** Owner/Manager "preview as role" override (null = use the real role). */
   previewRole: UiRole | null;
   setPreviewRole: (r: UiRole | null) => void;
@@ -232,11 +235,37 @@ export function DocumentProvider({
 
   const me = getCurrentUser();
   const isCreator = !!(doc && me && doc.ownerId === me.id);
-  const effectiveBackendRole: BackendRole | null = previewRole
-    ? toBackendRole(previewRole)
+  const realUiRole = toUiRole(resolvedRole, isCreator);
+
+  // "Preview as role" may only DOWNGRADE the view (e.g. an Owner previewing a
+  // Viewer's read-only experience). It must never UPGRADE: a Viewer previewing
+  // as Owner would otherwise gain edit/approve capabilities client-side
+  // (privilege escalation). We clamp the previewed role to the user's real
+  // resolved role by rank, so caps can never exceed what the backend granted.
+  const ROLE_RANK: Record<BackendRole, number> = {
+    viewer: 0,
+    editor: 1,
+    approver: 2,
+    owner: 3,
+  };
+  const previewBackendRole = previewRole ? toBackendRole(previewRole) : null;
+  const previewAllowed =
+    !!previewBackendRole &&
+    !!resolvedRole &&
+    ROLE_RANK[previewBackendRole] <= ROLE_RANK[resolvedRole];
+  const effectiveBackendRole: BackendRole | null = previewAllowed
+    ? previewBackendRole
     : resolvedRole;
   const caps = capsForRole(effectiveBackendRole);
-  const uiRole = previewRole ?? toUiRole(resolvedRole, isCreator);
+  const uiRole = previewAllowed ? (previewRole as UiRole) : realUiRole;
+
+  // Role-enforced read-only. A user without edit capability (viewer, or an
+  // unresolved/no-access role) is ALWAYS read-only regardless of the manual
+  // "Viewing/Editing" toggle — so they cannot type in the editor or trip
+  // autosave. Users with edit rights may still opt into read-only via the
+  // toggle. (The collab server independently rejects edits from viewers, so this
+  // is the matching client-side guard, not the only one.)
+  const effectiveReadOnly = readOnly || !caps.canEdit;
 
   const value = React.useMemo<DocumentContextValue>(
     () => ({
@@ -247,12 +276,13 @@ export function DocumentProvider({
       status,
       saveStatus,
       lastSavedAt,
-      readOnly,
+      readOnly: effectiveReadOnly,
       commentsOpen,
       shareOpen,
       versionsOpen,
       caps,
       uiRole,
+      realUiRole,
       previewRole,
       setPreviewRole,
       setReadOnly,
@@ -273,12 +303,13 @@ export function DocumentProvider({
       status,
       saveStatus,
       lastSavedAt,
-      readOnly,
+      effectiveReadOnly,
       commentsOpen,
       shareOpen,
       versionsOpen,
       caps,
       uiRole,
+      realUiRole,
       previewRole,
       setTitle,
       setStatus,
