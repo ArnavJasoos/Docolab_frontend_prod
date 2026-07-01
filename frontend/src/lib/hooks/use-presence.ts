@@ -1,31 +1,58 @@
 "use client";
 
 import * as React from "react";
+import { usePluginOption } from "platejs/react";
+import { YjsPlugin } from "@platejs/yjs/react";
 
-import type { PresenceUser } from "@/lib/types";
-import * as collaborators from "@/lib/api/collaborators";
+import type { PresenceHue, PresenceUser } from "@/lib/types";
+
+interface AwarenessData {
+  userId?: string;
+  name?: string;
+  hue?: PresenceHue;
+}
 
 /**
- * Returns the users currently present in a document. Polls the stub on an
- * interval today; the backend swaps the body for a realtime subscription
- * without changing this hook's contract.
+ * Returns the users currently present in a document, sourced from live Yjs
+ * (Hocuspocus) awareness. Each connected client publishes its identity into
+ * awareness `data` (see presence-identity / yjs-kit); this hook reads every
+ * client's state and de-dupes by real user id (one avatar per user, even with
+ * multiple tabs).
+ *
+ * Must be used inside <Plate> (the YjsPlugin provides the awareness option).
+ * The `docId` argument is kept for API compatibility with callers; the room is
+ * already bound to the editor's Yjs provider.
  */
-export function usePresence(docId: string, intervalMs = 15_000): PresenceUser[] {
+export function usePresence(docId: string): PresenceUser[] {
+  void docId; // room is bound to the editor's Yjs provider; kept for API compat
+  const awareness = usePluginOption(YjsPlugin, "awareness");
   const [users, setUsers] = React.useState<PresenceUser[]>([]);
 
   React.useEffect(() => {
-    let cancelled = false;
-    const tick = async () => {
-      const next = await collaborators.getPresence(docId);
-      if (!cancelled) setUsers(next);
+    if (!awareness) return;
+
+    const build = () => {
+      const byUser = new Map<string, PresenceUser>();
+      for (const state of awareness.getStates().values()) {
+        const data = (state as { data?: AwarenessData })?.data;
+        if (!data?.userId) continue;
+        byUser.set(data.userId, {
+          id: data.userId,
+          name: data.name ?? "Anonymous",
+          email: "",
+          hue: data.hue ?? "violet",
+          state: "active",
+        });
+      }
+      setUsers([...byUser.values()]);
     };
-    void tick();
-    const handle = setInterval(() => void tick(), intervalMs);
+
+    build();
+    awareness.on("change", build);
     return () => {
-      cancelled = true;
-      clearInterval(handle);
+      awareness.off("change", build);
     };
-  }, [docId, intervalMs]);
+  }, [awareness]);
 
   return users;
 }

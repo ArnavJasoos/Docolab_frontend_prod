@@ -3,6 +3,7 @@
 import { YjsPlugin } from '@platejs/yjs/react';
 
 import { getToken } from '@/lib/api/client';
+import type { CursorIdentity } from '@/lib/presence-identity';
 
 const COLLAB_URL =
   process.env.NEXT_PUBLIC_COLLAB_URL ?? 'ws://localhost:1234';
@@ -17,11 +18,16 @@ const COLLAB_URL =
  * short-lived (~60m) and rotated by the REST refresh flow — a reconnect after a
  * rotation picks up the fresh token instead of failing auth with a stale one.
  *
+ * `cursors.data` publishes the local user's identity (colour + name) into Yjs
+ * awareness so other clients can render this user's caret and presence avatar.
+ *
  * @param docId - document UUID, used as the Hocuspocus document name
+ * @param cursorData - the local user's awareness identity (see presence-identity)
  */
-export function createYjsPlugin(docId: string) {
+export function createYjsPlugin(docId: string, cursorData: CursorIdentity) {
   return YjsPlugin.configure({
     options: {
+      cursors: { data: cursorData },
       providers: [
         {
           type: 'hocuspocus' as const,

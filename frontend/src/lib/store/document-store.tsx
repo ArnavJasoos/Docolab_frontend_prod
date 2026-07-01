@@ -18,10 +18,6 @@ import { getCurrentUser } from "@/lib/api/auth";
 
 const AUTOSAVE_DELAY = 1200;
 
-// Mirrors plate-editor: with collaboration off (default), content is saved over
-// REST; with it on, Yjs/Hocuspocus owns content and autosave skips it.
-const COLLAB_ENABLED = process.env.NEXT_PUBLIC_COLLAB_ENABLED === "true";
-
 interface DocumentContextValue {
   docId: string;
   doc: DocumentRecord | null;
@@ -171,14 +167,12 @@ export function DocumentProvider({
     }
     setSaveStatus("saving");
     try {
-      // When collaboration is on, content is owned by Yjs/Hocuspocus and autosave
-      // only persists governance/metadata (sending `content` would clobber the
-      // live shared doc). When collab is off (default — no sync server yet),
-      // persist `content` too so local edits are actually saved.
+      // Content is owned by Yjs/Hocuspocus (real-time, canonical). Autosave only
+      // persists governance/metadata here — sending `content` would clobber the
+      // live shared doc with a stale REST snapshot.
       await documentsApi.updateDocument(idRef.current, {
         title: titleRef.current,
         status: statusRef.current,
-        ...(COLLAB_ENABLED ? {} : { content: contentRef.current ?? undefined }),
       });
       setSaveStatus("saved");
       setLastSavedAt(new Date().toISOString());
