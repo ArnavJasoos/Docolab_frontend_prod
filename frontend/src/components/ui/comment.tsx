@@ -25,7 +25,6 @@ import {
   type TCommentText,
   type Value,
   KEYS,
-  nanoid,
   NodeApi,
 } from 'platejs';
 import {
@@ -460,7 +459,10 @@ export function CommentCreateForm({
           id: discussionId,
           comments: [
             {
-              id: nanoid(),
+              // The root comment shares the discussion id — the backend
+              // threads by root-comment id, and the text mark is keyed by the
+              // discussion id, so all three must be the same value.
+              id: discussionId,
               contentRich: commentValue,
               createdAt: new Date(),
               discussionId,
@@ -480,9 +482,9 @@ export function CommentCreateForm({
         return;
       }
 
-      // Create reply comment
+      // Create reply comment (UUID so the backend can store it under the same id)
       const comment: TComment = {
-        id: nanoid(),
+        id: crypto.randomUUID(),
         contentRich: commentValue,
         createdAt: new Date(),
         discussionId,
@@ -516,13 +518,15 @@ export function CommentCreateForm({
       .map(([node, _path]: NodeEntry<TCommentText>) => node.text)
       .join('');
 
-    const _discussionId = nanoid();
-    // Mock creating new discussion
+    // UUID (not nanoid): this id keys the comment MARK in the Yjs text AND the
+    // backend comment row, so it must be a stable, backend-valid UUID.
+    const _discussionId = crypto.randomUUID();
     const newDiscussion: TDiscussion = {
       id: _discussionId,
       comments: [
         {
-          id: nanoid(),
+          // Root comment id === discussion id (backend threads by root id).
+          id: _discussionId,
           contentRich: commentValue,
           createdAt: new Date(),
           discussionId: _discussionId,

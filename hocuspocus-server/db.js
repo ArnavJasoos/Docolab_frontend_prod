@@ -11,12 +11,27 @@ const { Pool } = pg;
 
 let pool = null;
 
+// Managed Postgres (Supabase/Neon/RDS) requires TLS; local Postgres does not.
+// Enable SSL only for a remote host so local behaviour is unchanged.
+function needsSsl(connectionString) {
+  try {
+    const host = new URL(connectionString).hostname;
+    return !["localhost", "127.0.0.1", "::1", ""].includes(host);
+  } catch {
+    return false; // unparseable → treat as local (no SSL)
+  }
+}
+
 function getPool() {
   if (!pool) {
+    const connectionString =
+      process.env.DATABASE_URL ??
+      "postgresql://postgres:postgres@localhost:5432/docplatform";
     pool = new Pool({
-      connectionString:
-        process.env.DATABASE_URL ??
-        "postgresql://postgres:postgres@localhost:5432/docplatform",
+      connectionString,
+      // rejectUnauthorized:false = encrypt without CA verification (demo-grade,
+      // mirrors the backend). Swap for a CA bundle to verify certs in prod.
+      ssl: needsSsl(connectionString) ? { rejectUnauthorized: false } : false,
       max: 5,
       idleTimeoutMillis: 30000,
       connectionTimeoutMillis: 5000,

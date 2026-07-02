@@ -52,26 +52,26 @@ describe("getUserRole — real SQL against pg-mem", () => {
     assert.equal(await getUserRole(ids.users.nearest, ids.docs.inChild), "editor");
   });
 
-  test("no assignment anywhere → safe viewer default", async () => {
-    assert.equal(await getUserRole(ids.users.none, ids.docs.inChild), "viewer");
+  test("no assignment anywhere → null (connection rejected)", async () => {
+    assert.equal(await getUserRole(ids.users.none, ids.docs.inChild), null);
   });
 
   test("a user's grant on one doc does NOT leak to an unrelated doc", async () => {
     // user-editor only has a grant on doc-in-child, not doc-other.
-    assert.equal(await getUserRole(ids.users.editor, ids.docs.other), "viewer");
+    assert.equal(await getUserRole(ids.users.editor, ids.docs.other), null);
   });
 
-  test("unknown document id → viewer (walk terminates safely)", async () => {
-    assert.equal(await getUserRole(ids.users.editor, "no-such-doc"), "viewer");
+  test("unknown document id → null (walk terminates safely)", async () => {
+    assert.equal(await getUserRole(ids.users.editor, "no-such-doc"), null);
   });
 
-  test("document pointing at a missing folder → viewer (no crash)", async () => {
-    assert.equal(await getUserRole(ids.users.parentOnly, ids.docs.orphan), "viewer");
+  test("document pointing at a missing folder → null (no crash)", async () => {
+    assert.equal(await getUserRole(ids.users.parentOnly, ids.docs.orphan), null);
   });
 
   test("parent-folder owner does NOT apply to a doc in a different tree", async () => {
     // doc-other is under folder-other (separate tree); user-parent has no path.
-    assert.equal(await getUserRole(ids.users.parentOnly, ids.docs.other), "viewer");
+    assert.equal(await getUserRole(ids.users.parentOnly, ids.docs.other), null);
   });
 });
 

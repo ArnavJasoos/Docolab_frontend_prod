@@ -68,7 +68,8 @@ describe('verifyToken', () => {
 
 // ─────────────────────────────────────────────────────────────────────────────
 // getUserRole hierarchy walk (mirrors auth_service.py::authorize):
-//   document → its folder → parent folders, first assignment wins, else viewer.
+//   document → its folder → parent folders, first assignment wins, else null
+//   (no access — the connection is rejected, matching the REST 403).
 // We model the DB as a sequence of scopes; the walker returns the first hit.
 // ─────────────────────────────────────────────────────────────────────────────
 
@@ -90,7 +91,7 @@ function walkRole(documentId, { assignment, docFolder, folderParent }) {
       scopeId = parent;
     }
   }
-  return 'viewer';
+  return null;
 }
 
 describe('getUserRole hierarchy walk', () => {
@@ -128,14 +129,14 @@ describe('getUserRole hierarchy walk', () => {
     assert.equal(walkRole('doc1', { assignment, docFolder, folderParent }), 'editor');
   });
 
-  test('defaults to viewer when no assignment exists anywhere', () => {
-    assert.equal(walkRole('doc1', { assignment: new Map(), docFolder, folderParent }), 'viewer');
+  test('resolves to null (no access) when no assignment exists anywhere', () => {
+    assert.equal(walkRole('doc1', { assignment: new Map(), docFolder, folderParent }), null);
   });
 
-  test('defaults to viewer when the document is not found', () => {
+  test('resolves to null (no access) when the document is not found', () => {
     assert.equal(
       walkRole('ghost', { assignment: new Map(), docFolder, folderParent }),
-      'viewer'
+      null
     );
   });
 });

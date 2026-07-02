@@ -1,6 +1,7 @@
 "use client";
 
 import * as React from "react";
+import { toast } from "sonner";
 import type { Value } from "platejs";
 
 import type { DocStatus, DocumentRecord, SaveStatus } from "@/lib/types";
@@ -106,6 +107,15 @@ export function DocumentProvider({
       // backend with it (the id isn't a UUID → 500). Create straight away.
       const isNew = !docId || docId === "new";
       let record = isNew ? null : await documentsApi.getDocument(docId);
+      if (!record && !isNew) {
+        // A real id that failed to load (deleted, no access, or backend down).
+        // Never fall through to create — that silently spawned a fresh blank
+        // "Untitled document" on every failed open. Send the user back instead.
+        if (cancelled) return;
+        toast.error("Couldn't open this document — it may have been deleted or you may not have access.");
+        if (typeof window !== "undefined") window.location.replace("/browser");
+        return;
+      }
       if (!record) {
         // Reuse the in-flight create for this docId so StrictMode's double
         // effect run issues a single POST instead of two blank documents.
@@ -220,12 +230,17 @@ export function DocumentProvider({
     await flush();
   }, [flush]);
 
-  // Flush pending autosave on unmount.
+  // Flush pending autosave on unmount (don't just drop the timer — a rename
+  // followed by an immediate navigation was silently lost).
   React.useEffect(() => {
     return () => {
-      if (timer.current) clearTimeout(timer.current);
+      if (timer.current) {
+        clearTimeout(timer.current);
+        timer.current = null;
+        void flush();
+      }
     };
-  }, []);
+  }, [flush]);
 
   const me = getCurrentUser();
   const isCreator = !!(doc && me && doc.ownerId === me.id);

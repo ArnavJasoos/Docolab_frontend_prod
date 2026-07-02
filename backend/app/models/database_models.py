@@ -391,6 +391,9 @@ class Version(Base):
     # submission. NULL = the submission uses the single owner gate.
     approval_policy_id: Mapped[Optional[uuid.UUID]] = mapped_column(UUID(as_uuid=True), ForeignKey("approval_policies.id"))
     yjs_state_vector: Mapped[Optional[bytes]]= mapped_column(BYTEA)
+    # Frozen Plate/Slate document value at snapshot time (JSONB). Powers the
+    # version diff + restore UI. NULL on legacy rows created before 0006.
+    content:          Mapped[Optional[list]] = mapped_column(JSONB)
     created_by:       Mapped[uuid.UUID]      = mapped_column(UUID(as_uuid=True), ForeignKey("users.id"), nullable=False)
     created_at:       Mapped[datetime]       = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now())
 

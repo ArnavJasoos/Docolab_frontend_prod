@@ -7,6 +7,7 @@ import {
   PlateElement,
   PlateLeaf,
   createPlatePlugin,
+  useEditorRef,
   usePlateEditor,
   usePluginOption,
   type PlateElementProps,
@@ -26,7 +27,6 @@ import { BaseEditorKit } from "@/components/editor/editor-base-kit";
 import { aiAttributionPlugin } from "@/components/editor/plugins/ai-attribution-kit";
 import { AI_EDIT_KEY } from "@/lib/ai-attribution";
 import { getSnapshot, type DocSnapshot } from "@/lib/api/snapshots";
-import * as documentsApi from "@/lib/api/documents";
 
 type Side = "old" | "new";
 
@@ -191,6 +191,11 @@ export function CompareView({
   snapshotId: string;
   onClose: () => void;
 }) {
+  // The compare overlay renders inside the editor's <Plate> tree, so this is
+  // the live (Yjs-canonical) editor — its children ARE the current document.
+  // (The REST body is intentionally blank; diffing against it showed the whole
+  // document as deleted, which was the "version diff broken" bug.)
+  const liveEditor = useEditorRef();
   const [snapshot, setSnapshot] = React.useState<DocSnapshot | null>(null);
   const [diffValue, setDiffValue] = React.useState<Value | null>(null);
   const [aiOn, setAiOn] = React.useState(false);
@@ -204,19 +209,18 @@ export function CompareView({
     let cancelled = false;
     (async () => {
       setLoading(true);
-      const [snap, current] = await Promise.all([
-        getSnapshot(docId, snapshotId),
-        documentsApi.getDocument(docId),
-      ]);
+      const snap = await getSnapshot(docId, snapshotId);
       if (cancelled) return;
-      if (!snap || !current) {
+      if (!snap?.value) {
+        setSnapshot(snap);
         setLoading(false);
         return;
       }
       // Diff old → current. aiEdit/comment marks are ignored so they don't
       // register as textual changes (they're rendered separately).
+      const current = structuredClone(liveEditor.children) as Value;
       const base = createSlateEditor({ plugins: BaseEditorKit });
-      const value = computeDiff(snap.value, current.content, {
+      const value = computeDiff(snap.value, current, {
         isInline: base.api.isInline,
         getInsertProps: defaultGetInsertProps,
         getDeleteProps: defaultGetDeleteProps,
@@ -230,6 +234,7 @@ export function CompareView({
     return () => {
       cancelled = true;
     };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [docId, snapshotId]);
 
   // Ratio-based synced scrolling (block heights differ between versions).
@@ -308,7 +313,15 @@ export function CompareView({
 
       {/* Panes */}
       <div className="flex min-h-0 flex-1">
-        {loading || !diffValue ? (
+        {!loading && snapshot && !snapshot.value ? (
+          <div className="flex flex-1 flex-col items-center justify-center gap-2 text-text-muted">
+            <Icon name="history_toggle_off" className="text-[32px]" />
+            <p className="font-ui-sm text-ui-sm">
+              This version was saved before content snapshots existed, so there
+              is nothing to compare.
+            </p>
+          </div>
+        ) : loading || !diffValue ? (
           <div className="flex flex-1 items-center justify-center text-text-muted">
             <Icon name="progress_activity" className="animate-spin text-[28px]" />
           </div>

@@ -126,6 +126,10 @@ export async function createTestDb() {
     // nearest: child-folder editor AND root-folder owner → child (nearer) wins.
     await A("a7", users.nearest, roles.editor, "folder", folders.child);
     await A("a8", users.nearest, roles.owner, "folder", folders.root);
+
+    // owner: doc-scoped owner (connections without ANY grant are now rejected,
+    // so every fixture user that must connect needs a real assignment).
+    await A("a9", users.owner, roles.owner, "document", docs.inChild);
   } finally {
     c.release();
   }

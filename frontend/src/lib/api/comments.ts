@@ -1,16 +1,16 @@
 // =============================================================================
-// lib/api/comments.ts — document discussions.
+// lib/api/comments.ts — document discussions, fully backend-backed.
 //
-// Reads are backed by the FastAPI comments cluster:
-//   GET /documents/{id}/comments -> { comments: CommentOut[] }
+//   GET    /documents/{id}/comments  -> { comments: CommentOut[] }
+//   POST   /documents/{id}/comments  (client supplies the UUID so the comment
+//                                     mark anchored in the Yjs text and the
+//                                     backend row share one id)
+//   PATCH  /comments/{id}            edit body
+//   PATCH  /comments/{id}/resolve    resolve/reopen a thread
+//   DELETE /comments/{id}            delete (root deletes the whole thread)
 //
 // The Plate discussion plugin (discussion-kit.tsx) is initialised with the
-// EMPTY defaults below and hydrated per-document at runtime. No seeded users or
-// threads remain.
-//
-// NOTE: inline mutations are cached client-side via saveDiscussions() for now;
-// full write-through (POST /documents/{id}/comments, PATCH /comments/{id}/resolve)
-// is the remaining follow-up.
+// EMPTY defaults below and hydrated per-document at runtime by DiscussionSync.
 // =============================================================================
 
 import type { Value } from "platejs";
@@ -80,21 +80,36 @@ export function bodyFromRich(rich: Value | undefined): string {
   return walk(rich as unknown[]).trim();
 }
 
-/** Create a comment on a document. Returns the backend comment id. */
+/** Create a comment on a document. The caller passes the client-generated
+ *  UUID (`id`) so the editor's comment mark and the backend row stay in sync. */
 export async function createComment(
   docId: string,
   body: string,
-  opts?: { parentCommentId?: string; anchor?: Record<string, unknown> },
+  opts?: { id?: string; parentCommentId?: string; anchor?: Record<string, unknown> },
 ): Promise<string> {
   const res = await apiFetch<CommentOut>(`/documents/${docId}/comments`, {
     method: "POST",
     body: JSON.stringify({
+      id: opts?.id ?? null,
       body,
       parent_comment_id: opts?.parentCommentId ?? null,
       anchor: opts?.anchor ?? null,
     }),
   });
   return res.id;
+}
+
+/** Edit a comment's text (author only, enforced server-side). */
+export async function updateComment(commentId: string, body: string): Promise<void> {
+  await apiFetch(`/comments/${commentId}`, {
+    method: "PATCH",
+    body: JSON.stringify({ body }),
+  });
+}
+
+/** Delete a comment; deleting a thread root deletes its replies too. */
+export async function deleteComment(commentId: string): Promise<void> {
+  await apiFetch(`/comments/${commentId}`, { method: "DELETE" });
 }
 
 /** Resolve / unresolve a comment thread (PATCH /comments/{id}/resolve). */
@@ -118,6 +133,11 @@ function toDiscussions(comments: CommentOut[]): TDiscussion[] {
       userId: root.author_id,
       createdAt: new Date(root.created_at),
       isResolved: root.is_resolved,
+      // The quoted text the thread was anchored to, persisted in `anchor`.
+      documentContent:
+        typeof root.anchor?.documentContent === "string"
+          ? (root.anchor.documentContent as string)
+          : undefined,
       comments: thread.map(
         (c): TComment => ({
           id: c.id,

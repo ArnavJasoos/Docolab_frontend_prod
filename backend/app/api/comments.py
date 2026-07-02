@@ -19,7 +19,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.database import get_db
 from app.api.deps import get_current_user
 from app.models.database_models import User, Document, Comment, Suggestion
-from app.schemas.comment import CommentCreate, CommentOut, CommentListResponse, CommentResolve
+from app.schemas.comment import (
+    CommentCreate, CommentOut, CommentListResponse, CommentResolve, CommentUpdate,
+)
 from app.services.auth_service import authorize, require_permission
 from app.services.audit_service import record_audit, AuditAction
 
@@ -78,6 +80,26 @@ async def create_comment(
     # Posting to the document's collaboration surface requires participation.
     await require_permission(db, current_user.id, "can_suggest", "document", doc.id)
 
+    # Idempotent create: the client supplies the comment id (it also keys the
+    # comment mark in the document text), so a retried POST for an id that
+    # already exists returns the existing row instead of erroring.
+    if data.id is not None:
+        existing = (
+            await db.execute(
+                select(Comment).where(
+                    Comment.id == data.id,
+                    Comment.org_id == current_user.org_id,
+                )
+            )
+        ).scalars().first()
+        if existing is not None:
+            if existing.document_id != doc.id:
+                raise HTTPException(
+                    status_code=status.HTTP_409_CONFLICT,
+                    detail="A comment with this id exists on another document",
+                )
+            return existing
+
     # Validate optional foreign keys belong to the same document/org.
     if data.suggestion_id is not None:
         linked = (
@@ -110,6 +132,7 @@ async def create_comment(
             )
 
     comment = Comment(
+        **({"id": data.id} if data.id is not None else {}),
         org_id=current_user.org_id,
         document_id=doc.id,
         suggestion_id=data.suggestion_id,
@@ -181,3 +204,75 @@ async def resolve_comment(
     await db.commit()
     await db.refresh(comment)
     return comment
+
+
+async def _get_comment_or_404(db: AsyncSession, comment_id, org_id) -> Comment:
+    comment = (
+        await db.execute(
+            select(Comment).where(Comment.id == comment_id, Comment.org_id == org_id)
+        )
+    ).scalars().first()
+    if not comment:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Comment not found")
+    return comment
+
+
+@router.patch("/comments/{id}", response_model=CommentOut)
+async def update_comment(
+    id: str,
+    data: CommentUpdate,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Edit a comment's text. Only the author may edit their own comment."""
+    comment = await _get_comment_or_404(db, id, current_user.org_id)
+    if comment.author_id != current_user.id:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Only the comment author may edit it",
+        )
+    comment.body = data.body
+    record_audit(
+        db, org_id=current_user.org_id, actor_id=current_user.id,
+        action=AuditAction.COMMENT_UPDATE, target_type="comment",
+        target_id=comment.id, document_id=comment.document_id,
+    )
+    await db.commit()
+    await db.refresh(comment)
+    return comment
+
+
+@router.delete("/comments/{id}", status_code=status.HTTP_204_NO_CONTENT)
+async def delete_comment(
+    id: str,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Delete a comment. The author or a resolver may delete. Deleting a ROOT
+    comment removes its whole thread (replies reference the root via FK)."""
+    comment = await _get_comment_or_404(db, id, current_user.org_id)
+
+    is_author = comment.author_id == current_user.id
+    has_perm, _, _ = await authorize(
+        db, current_user.id, "can_resolve_suggestion", "document", str(comment.document_id)
+    )
+    if not is_author and not has_perm:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Only the comment author or a resolver may delete it",
+        )
+
+    # Replies first (the FK has no cascade), then the comment itself.
+    if comment.parent_comment_id is None:
+        replies = (
+            await db.execute(select(Comment).where(Comment.parent_comment_id == comment.id))
+        ).scalars().all()
+        for r in replies:
+            await db.delete(r)
+    await db.delete(comment)
+    record_audit(
+        db, org_id=current_user.org_id, actor_id=current_user.id,
+        action=AuditAction.COMMENT_DELETE, target_type="comment",
+        target_id=comment.id, document_id=comment.document_id,
+    )
+    await db.commit()

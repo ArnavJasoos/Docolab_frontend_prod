@@ -27,7 +27,7 @@ const jetbrains = JetBrains_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "Docflow",
+  title: "Docolab",
   description: "Documents that move at your team's speed",
 };
 

@@ -309,7 +309,82 @@ works end-to-end (`collaborators.ts::searchUsers` polls `GET /users` by
 name/email → `assignments.assignRole` → `POST /assignments` doc-scoped). It was
 just invisible because the editor body is blank and isolation masked it.
 
-## KNOWN UNRESOLVED: blank editor document body (the "Yjs gating" problem)
+## RESOLVED (2026-07-02): blank editor body + production-readiness pass
+
+All nine production issues fixed and verified live (backend smoke test +
+browser session against the running stack). Summary of the session's changes:
+
+**Blank editor body — ROOT CAUSE FOUND & FIXED.** With
+`skipInitialization: true`, `PlateContent` returns null while
+`editor.children` is empty, and NOTHING re-renders it after the async
+`yjs.init()` finishes (the creation-time `onReady` that `usePlateEditor` uses
+to force a re-render is skipped along with init). Fix: pass `onReady` to
+`yjs.init({...})` in `plate-editor.tsx` and bump a state. Also added a
+StrictMode single-init guard (re-run reconnects instead of re-initializing) —
+kills the dev-only "[yjs] Tried to remove event handler" spam + duplicate WS.
+
+**"new" room bug (document saving).** The Yjs room name was the ROUTE id —
+literally `"new"` for every fresh document — so all new docs shared one room
+and persistence wrote to `WHERE id='new'` (no row). Room is now the RESOLVED
+`doc.id`. Verified: type → `[store] doc=<uuid>` → reload restores content.
+
+**Comments (end-to-end).** `DiscussionSync` was never mounted — now mounted in
+`plate-editor.tsx`. Comment ids are client-generated UUIDs shared with the
+backend (`CommentCreate.id`, idempotent create), so text marks/plugin
+state/backend rows stay in sync across reloads. Anchor (`documentContent`)
+persisted. New backend endpoints: `PATCH /comments/{id}` (edit, author-only),
+`DELETE /comments/{id}` (author or resolver; root deletes thread).
+`discussion-sync.tsx` write-through now covers create/edit/delete/resolve.
+
+**Version diff/restore (backend-backed).** New `versions.content` JSONB
+(migration `0006_version_content`) + `POST /documents/{id}/versions`
+(kind='snapshot') + content on `GET /versions/{id}` and on
+submit-for-approval. `lib/api/snapshots.ts` rewritten onto these (localStorage
+store + demo seeds deleted). Version dialog captures the LIVE editor children;
+compare diffs snapshot vs live editor; restore applies content to the live
+editor (propagates via Yjs — no reload). Submission numbering now uses
+max(version_no)+1 so snapshots and submissions never collide.
+
+**Isolation hardening.** `GET /documents/{id}` now requires
+`can_view_history` (was: any org member could read metadata).
+`hocuspocus-server/auth.js::getUserRole` returns null (connection REJECTED)
+instead of defaulting to viewer — the old default let ANY authenticated user
+read ANY document's content over WS by UUID. Tests updated (59/59 pass).
+`document-store` no longer silently CREATES a new doc when loading an
+existing id fails (was spawning blank "Untitled document"s on 403/404/network
+errors) — it toasts and returns to /browser.
+
+**Disconnects.** `client.ts::getFreshToken()` (decodes JWT exp, refreshes when
+<60s left); the Hocuspocus provider token is now that async fn, so a reconnect
+after access-token expiry silently rotates instead of failing auth forever.
+
+**Presence cursors.** Added `@slate-yjs/react` +
+`components/ui/remote-cursor-overlay.tsx`, wired via YjsPlugin
+`render.afterEditable`. Remote carets/selections render in each user's hue
+with a fading name label.
+
+**Access control menu.** Share dialog: proper error toasts on
+invite/change/remove (were unhandled rejections), and "Commenter" removed from
+assignable roles (it silently granted editor). `components/editor/
+access-control-panel.tsx` is dead code (never imported) — candidate for
+deletion.
+
+**Branding/UX.** "Docflow" → "Docolab" in layout metadata, top-nav, login,
+signup; signup branding panel now vertically centered (matches login); login
+field relabelled Email (was "Username"/"admin" demo leftovers). localStorage
+keys (`docflow.token` etc.) deliberately KEPT so existing sessions survive the
+deploy. Backend list items now include `updated_at` (browser sort/labels work).
+
+**Deploy checklist (Vercel + backend/collab hosts)**
+- Vercel env: `NEXT_PUBLIC_API_URL=https://<backend>/api`,
+  `NEXT_PUBLIC_COLLAB_URL=wss://<hocuspocus>` (MUST be wss:// on https pages),
+  `GOOGLE_GENERATIVE_AI_API_KEY`.
+- Backend: deploy with `AUTO_MIGRATE=1` (applies `0006_version_content`) or run
+  `alembic upgrade head` manually. CORS_ORIGINS must include the Vercel domain.
+- hocuspocus-server: mandatory infra; needs `JWT_SECRET` (= backend
+  SECRET_KEY) + `DATABASE_URL`; port open for WSS.
+
+## RESOLVED HISTORY: blank editor document body (the "Yjs gating" problem)
 
 **Symptom**: the editor chrome renders (menus, title, Saved status, role badge,
 Share) but the document body is **completely blank** — no `contenteditable` /

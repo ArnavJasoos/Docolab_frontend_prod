@@ -124,9 +124,10 @@ describe("e2e: real provider ↔ server ↔ auth/storage ↔ pg-mem", () => {
     }
   });
 
-  test("a user with no grant defaults to viewer (read-only)", async () => {
+  test("a user with no grant is rejected — their edits never reach the doc", async () => {
     const h = await harness();
     try {
+      // onAuthenticate throws for a null role, so this connection never syncs.
       const none = h.connect(ids.docs.inChild, sign(ids.users.none));
       const editor = h.connect(ids.docs.inChild, sign(ids.users.editor));
       await sleep(500);

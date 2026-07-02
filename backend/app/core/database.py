@@ -10,7 +10,9 @@
 # =============================================================================
 
 import os
+import ssl
 from pathlib import Path
+from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
 from dotenv import load_dotenv
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
@@ -53,6 +55,37 @@ elif DATABASE_URL.startswith("postgres://"):
 
 
 # ---------------------------------------------------------------------------
+# SSL — managed Postgres (Supabase/Neon/RDS) requires TLS; local Postgres does
+# not. asyncpg takes SSL via a connect_arg, NOT the libpq `?sslmode=` query
+# param (which it cannot parse), so we strip any such params from the URL and
+# decide SSL ourselves based on the host. For localhost the behaviour is
+# byte-for-byte unchanged: no SSL, no extra connect args.
+# ---------------------------------------------------------------------------
+_parts = urlsplit(DATABASE_URL)
+_LIBPQ_SSL_KEYS = {"sslmode", "ssl", "sslcert", "sslkey", "sslrootcert", "channel_binding"}
+_clean_query = urlencode(
+    [(k, v) for k, v in parse_qsl(_parts.query) if k.lower() not in _LIBPQ_SSL_KEYS]
+)
+DATABASE_URL = urlunsplit((_parts.scheme, _parts.netloc, _parts.path, _clean_query, _parts.fragment))
+_DB_HOST = _parts.hostname or ""
+_DB_IS_LOCAL = _DB_HOST in ("localhost", "127.0.0.1", "::1", "")
+
+_connect_args: dict = {}
+if not _DB_IS_LOCAL:
+    # Encrypt the connection. CERT_NONE keeps the demo simple (no CA bundle to
+    # wrangle) while still using TLS; tighten to CERT_REQUIRED + a CA for prod.
+    _ssl_ctx = ssl.create_default_context()
+    _ssl_ctx.check_hostname = False
+    _ssl_ctx.verify_mode = ssl.CERT_NONE
+    _connect_args["ssl"] = _ssl_ctx
+    # Supabase's TRANSACTION pooler (port 6543) is pgbouncer and cannot reuse
+    # asyncpg prepared statements — disable the cache there. The SESSION pooler
+    # / direct connection (5432) is a normal Postgres and needs none of this.
+    if _parts.port == 6543:
+        _connect_args["statement_cache_size"] = 0
+
+
+# ---------------------------------------------------------------------------
 # Engine
 # ---------------------------------------------------------------------------
 # echo=False in production. Set echo=True temporarily to see SQL in the
@@ -64,6 +97,7 @@ engine = create_async_engine(
     pool_size=10,          # number of connections kept open
     max_overflow=20,       # extra connections allowed under load
     pool_pre_ping=True,    # test connections before using (handles server restarts)
+    connect_args=_connect_args,  # {} for local (no-op); {"ssl": ...} for Supabase
 )
 
 

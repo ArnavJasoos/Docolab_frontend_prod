@@ -93,6 +93,35 @@ async function refreshAccessToken(): Promise<string | null> {
   return refreshInFlight;
 }
 
+/** Seconds-since-epoch `exp` claim of a JWT, or null if unreadable. */
+function tokenExpiry(token: string): number | null {
+  try {
+    const payload = JSON.parse(atob(token.split(".")[1])) as { exp?: number };
+    return typeof payload.exp === "number" ? payload.exp : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Return an access token that is valid for at least ~60 more seconds,
+ * refreshing it first when it is expired or about to expire.
+ *
+ * Used by the collaboration WebSocket: the provider re-authenticates with this
+ * on every (re)connect, so a reconnect that happens after the short-lived
+ * access token expired silently rotates it instead of failing auth forever.
+ */
+export async function getFreshToken(): Promise<string | null> {
+  const token = getToken();
+  if (!token) return null;
+  const exp = tokenExpiry(token);
+  if (exp !== null && exp - Date.now() / 1000 < 60) {
+    const refreshed = await refreshAccessToken();
+    return refreshed ?? getToken();
+  }
+  return token;
+}
+
 // Endpoints that must NOT trigger a refresh-retry: a 401 from these is a real
 // auth failure (bad password / expired-or-revoked refresh token), not an expired
 // access token — refreshing there would loop. (Note: /auth/me is intentionally

@@ -41,7 +41,7 @@ export function buildServer({ port = PORT, quiet = false } = {}) {
   return new Server({
   port,
   quiet, // suppress the start banner (used by tests)
-  timeout: 30000, // disconnect idle clients after 30s
+  timeout: 30000, // ping/pong health-check window (NOT an idle kick — browsers answer pings automatically)
   debounce: 2000, // wait 2s of inactivity before calling onStoreDocument
   maxDebounce: 10000, // always store within 10s even if the client keeps typing
 
@@ -58,6 +58,13 @@ export function buildServer({ port = PORT, quiet = false } = {}) {
 
     // documentName is the document UUID (set from the frontend provider config)
     const role = await getUserRole(user.id, documentName);
+
+    // No role anywhere up the scope hierarchy = no access. Mirrors the REST
+    // API's authorize() (403) — receiving the Y.Doc IS reading the document.
+    if (!role) {
+      console.log(`[auth] user=${user.id} doc=${documentName} DENIED (no role)`);
+      throw new Error("Forbidden: no access to this document");
+    }
 
     // Read-only connections can receive updates but cannot send edits.
     connectionConfig.readOnly = READ_ONLY_ROLES.has(role);

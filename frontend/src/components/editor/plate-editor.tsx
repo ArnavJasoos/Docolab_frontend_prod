@@ -22,35 +22,36 @@ const CommentsPanel = dynamic(
   { ssr: false },
 );
 import { DocumentProvider, useDocument } from "@/lib/store/document-store";
+import { DiscussionSync } from "@/components/editor/discussion-sync";
 import { AuthGuard } from "@/components/auth-guard";
 
 export function PlateEditor({ docId }: { docId: string }) {
   return (
     <AuthGuard>
       <DocumentProvider docId={docId}>
-        <Workspace routeDocId={docId} />
+        <Workspace />
       </DocumentProvider>
     </AuthGuard>
   );
 }
 
-function Workspace({ routeDocId }: { routeDocId: string }) {
+function Workspace() {
   const { doc, loading } = useDocument();
 
   if (loading || !doc) return <LoadingShell />;
   // Re-mount the Plate editor when the underlying document changes.
-  return <LoadedWorkspace key={doc.id} doc={doc} routeDocId={routeDocId} />;
+  return <LoadedWorkspace key={doc.id} doc={doc} />;
 }
 
-function LoadedWorkspace({ doc, routeDocId }: { doc: DocumentRecord; routeDocId: string }) {
+function LoadedWorkspace({ doc }: { doc: DocumentRecord }) {
   // Real-time collaboration is always on: content is owned by Yjs/Hocuspocus
   // (the canonical, persisted path) and the REST `content` is only the seed used
   // when a document's shared Y.Doc is still empty.
   //
-  // The Hocuspocus room is the canonical document id from the route (the real
-  // backend UUID), NOT the local metadata record id — they coincide once the
-  // document store talks to the real API, but the route id is authoritative for
-  // collaboration so two clients on the same URL share a room.
+  // The Hocuspocus room is the RESOLVED backend document id (doc.id), never the
+  // raw route id: on /editor (no ?doc=) the route id is the sentinel "new", and
+  // using it as the room name would (a) drop every user creating a new document
+  // into one shared room and (b) persist to a non-existent row, losing content.
   const cursorData = React.useMemo(() => {
     const me = getCurrentUser();
     return buildCursorIdentity(
@@ -64,23 +65,40 @@ function LoadedWorkspace({ doc, routeDocId }: { doc: DocumentRecord; routeDocId:
     // shared doc is empty).
     skipInitialization: true,
     plugins: React.useMemo(
-      () => [...EditorKit, createYjsPlugin(routeDocId, cursorData)],
+      () => [...EditorKit, createYjsPlugin(doc.id, cursorData)],
       // eslint-disable-next-line react-hooks/exhaustive-deps
       [],
     ),
   });
   const { readOnly, commentsOpen, saveNow } = useDocument();
+  // With skipInitialization the editor starts with empty children and
+  // PlateContent renders null. yjs.init() populates children asynchronously,
+  // but nothing re-renders the tree when it finishes — onReady flips this state
+  // so the editable actually mounts. (This was the "blank editor body" bug.)
+  const [, setYjsReady] = React.useState(false);
 
   // Connect to Hocuspocus and seed the shared Y.Doc. On the very first connect
   // for a document (yjs_state is NULL server-side) the shared doc is empty, so
   // we seed it from the REST `content` we already loaded. Once content lives in
   // Yjs, that seed is ignored (init only seeds when the shared doc is empty).
+  const yjsInitedRef = React.useRef(false);
   React.useEffect(() => {
-    void editor.getApi(YjsPlugin).yjs.init({
-      id: routeDocId,
-      value: doc.content,
-      autoConnect: true,
-    });
+    const yjs = editor.getApi(YjsPlugin).yjs;
+    // init() exactly once per editor instance. React StrictMode (dev) runs
+    // this effect twice on the same editor; a second init() would create a
+    // duplicate provider/WebSocket and spam "[yjs] Tried to remove event
+    // handler" on cleanup. On the re-run just (re)connect the providers.
+    if (yjsInitedRef.current) {
+      yjs.connect();
+    } else {
+      yjsInitedRef.current = true;
+      void yjs.init({
+        id: doc.id,
+        value: doc.content,
+        autoConnect: true,
+        onReady: () => setYjsReady(true),
+      });
+    }
     // Publish the local user's presence identity immediately (before the first
     // cursor move) so the avatar stack shows this user as soon as they join.
     try {
@@ -89,7 +107,7 @@ function LoadedWorkspace({ doc, routeDocId }: { doc: DocumentRecord; routeDocId:
       /* awareness not ready yet — autoSend will publish on first selection */
     }
     return () => {
-      editor.getApi(YjsPlugin).yjs.destroy();
+      yjs.destroy();
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
@@ -109,6 +127,7 @@ function LoadedWorkspace({ doc, routeDocId }: { doc: DocumentRecord; routeDocId:
   return (
     <Plate editor={editor}>
       <CollabStatus />
+      <DiscussionSync docId={doc.id} />
       <div className="flex h-screen flex-col overflow-hidden">
         <EditorTopBar />
         <div className="flex min-h-0 flex-1">

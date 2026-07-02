@@ -38,6 +38,8 @@ class DocumentListItem(BaseModel):
     starred: bool
     trashed: bool
     created_by: uuid.UUID
+    # Needed by the browser's "Last modified" sort + "Updated Xh ago" labels.
+    updated_at: datetime
 
     class Config:
         from_attributes = True

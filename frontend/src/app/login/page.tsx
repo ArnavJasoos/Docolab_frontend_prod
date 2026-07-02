@@ -20,7 +20,7 @@ export default function LoginPage() {
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setError(null);
-    if (!username.trim()) return setError("Please enter your username.");
+    if (!username.trim()) return setError("Please enter your email.");
     if (!password) return setError("Please enter your password.");
 
     setLoading("form");
@@ -85,7 +85,7 @@ export default function LoginPage() {
             <Icon name="description" fill className="text-[20px] text-on-primary" />
           </div>
           <span className="font-display-sm text-display-sm font-bold tracking-tight text-primary">
-            Docflow
+            Docolab
           </span>
         </div>
         <div className="w-full max-w-[400px]">
@@ -111,19 +111,19 @@ export default function LoginPage() {
                 className="mb-xs block font-ui-sm text-ui-sm font-medium text-text-primary"
                 htmlFor="username"
               >
-                Username
+                Email
               </label>
               <div className="relative">
                 <div className="pointer-events-none absolute inset-y-0 left-0 flex items-center pl-3">
-                  <Icon name="person" className="text-[20px] text-text-muted" />
+                  <Icon name="mail" className="text-[20px] text-text-muted" />
                 </div>
                 <input
                   className="block h-[44px] w-full rounded-lg border border-border-subtle bg-document-surface pl-10 pr-3 font-ui-base text-ui-base text-text-primary transition-shadow placeholder:text-text-muted focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary"
                   id="username"
                   name="username"
-                  placeholder="admin"
-                  type="text"
-                  autoComplete="username"
+                  placeholder="you@company.com"
+                  type="email"
+                  autoComplete="email"
                   value={username}
                   onChange={(e) => setUsername(e.target.value)}
                 />

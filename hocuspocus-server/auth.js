@@ -25,7 +25,7 @@ export async function verifyToken(token) {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// getUserRole(userId, documentId) → role name string
+// getUserRole(userId, documentId) → role name string | null
 //
 // Mirrors app/services/auth_service.py::resolve_role EXACTLY — keep the two in
 // sync. The walk is: document → its folder → parent folders → ORG (terminal).
@@ -34,7 +34,10 @@ export async function verifyToken(token) {
 // grants them access — a split-brain between the two networking layers.
 //   - Matches assignments by (user_id, scope_type, scope_id) only (single-org v1,
 //     like the backend — no org_id filter on the assignment lookup).
-//   - Returns "viewer" as a safe read-only default when no assignment is found.
+//   - Returns null when no assignment is found anywhere up the hierarchy. The
+//     server REJECTS such connections: resolve_role denies these users on the
+//     REST side, and defaulting to "viewer" here leaked every document's
+//     content to any authenticated user who guessed/knew its UUID.
 // ─────────────────────────────────────────────────────────────────────────────
 export async function getUserRole(userId, documentId) {
   let scopeType = "document";
@@ -82,6 +85,6 @@ export async function getUserRole(userId, documentId) {
     }
   }
 
-  // No assignment found anywhere up the hierarchy — safe read-only default.
-  return "viewer";
+  // No assignment found anywhere up the hierarchy — no access.
+  return null;
 }

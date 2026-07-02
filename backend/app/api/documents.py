@@ -180,7 +180,7 @@ async def list_documents(
 
 @router.get("/{id}", response_model=DocumentResponse)
 async def get_document(id: str, db: AsyncSession = Depends(get_db), current_user: User = Depends(get_current_user)):
-    """Get a single document by ID"""
+    """Get a single document by ID (requires read access on the document)."""
     try:
         uuid.UUID(id)
     except ValueError:
@@ -192,6 +192,11 @@ async def get_document(id: str, db: AsyncSession = Depends(get_db), current_user
     # from the recycle bin, so only status=deleted yields 404 here).
     if not doc or doc.status == "deleted":
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Document not found")
+
+    # Per-user isolation: metadata (title/status/version) is still document
+    # data — without this check any org member could read it by guessing ids.
+    await require_permission(db, current_user.id, "can_view_history", "document", doc.id)
+
     starred = bool(await _starred_ids(db, current_user.id, [doc.id]))
     return _with_star(doc, starred)
 

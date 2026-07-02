@@ -30,7 +30,9 @@ const ROLE_LABEL: Record<Role, string> = {
   viewer: "Viewer",
 };
 
-const ASSIGNABLE: Role[] = ["editor", "commenter", "viewer"];
+// Only roles that exist on the backend are assignable. "commenter" is NOT one
+// of them — it silently mapped to editor (an accidental privilege grant).
+const ASSIGNABLE: Role[] = ["editor", "viewer"];
 
 function RoleSelect({
   value,
@@ -130,6 +132,8 @@ export function ShareDialog({
       setState(next);
       setEmail("");
       toast.success(`Shared with ${user.name} as ${ROLE_LABEL[inviteRole].toLowerCase()}`);
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Couldn't share the document");
     } finally {
       setInviting(false);
     }
@@ -153,17 +157,31 @@ export function ShareDialog({
       setState(next);
       setEmail("");
       toast.success(`Invited ${value}`);
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Couldn't invite that person");
     } finally {
       setInviting(false);
     }
   };
 
   const changeRole = async (userId: string, role: Role) => {
-    setState(await collaborators.updateCollaboratorRole(docId, userId, role));
+    try {
+      setState(await collaborators.updateCollaboratorRole(docId, userId, role));
+      toast.success(`Role changed to ${ROLE_LABEL[role].toLowerCase()}`);
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Couldn't change the role");
+      // Reconcile — the revoke may have applied even if the re-assign failed.
+      setState(await collaborators.getShareState(docId).catch(() => state));
+    }
   };
 
   const remove = async (userId: string) => {
-    setState(await collaborators.removeCollaborator(docId, userId));
+    try {
+      setState(await collaborators.removeCollaborator(docId, userId));
+      toast.success("Access removed");
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Couldn't remove access");
+    }
   };
 
   const setAccess = async (anyone: boolean) => {

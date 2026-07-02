@@ -12,7 +12,7 @@ from app.schemas.version import (
     VersionResponse, VersionListResponse, VersionMetadataResponse,
     DiffResponse, SubmitForApprovalRequest, SubmitForApprovalResponse,
     ApprovalRequest, ApprovalResponse, RejectRequest, RejectResponse,
-    RestoreRequest, RestoreResponse
+    RestoreRequest, RestoreResponse, SnapshotCreateRequest
 )
 from app.services.auth_service import authorize, require_permission, resolve_role
 from app.services.audit_service import record_audit, AuditAction
@@ -114,7 +114,59 @@ async def get_version(
         "version_no": version.version_no, "kind": version.kind,
         "created_by": version.created_by, "created_at": version.created_at,
         "s3_url": s3_url,
+        "content": version.content,
     }
+
+
+@router.post(
+    "/documents/{id}/versions",
+    response_model=VersionResponse,
+    status_code=status.HTTP_201_CREATED,
+)
+async def create_snapshot(
+    id: str,
+    data: SnapshotCreateRequest,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """Freeze the current document content as a named version WITHOUT entering
+    the approval flow (kind='snapshot'). Snapshots appear in version history
+    and can be diffed/restored, but never participate in approvals
+    (approve/reject only accept kind='submission')."""
+    doc = (
+        await db.execute(select(Document).where(Document.id == id, Document.org_id == current_user.org_id))
+    ).scalars().first()
+    if not doc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Document not found")
+
+    await require_permission(db, current_user.id, "can_edit_direct", "document", doc.id)
+
+    # Snapshots number after every existing version so history stays ordered.
+    max_no = (
+        await db.execute(
+            select(Version.version_no)
+            .where(Version.document_id == doc.id)
+            .order_by(Version.version_no.desc())
+        )
+    ).scalars().first() or 0
+    new_version_no = max(max_no, doc.current_version_no) + 1
+
+    version = Version(
+        id=uuid.uuid4(), org_id=current_user.org_id, document_id=doc.id,
+        version_no=new_version_no, kind="snapshot",
+        s3_key=f"versions/{doc.id}/v{new_version_no}",
+        content=data.content, created_by=current_user.id,
+    )
+    db.add(version)
+    record_audit(
+        db, org_id=current_user.org_id, actor_id=current_user.id,
+        action=AuditAction.SUBMIT, target_type="version",
+        target_id=version.id, document_id=doc.id,
+        meta={"version_no": new_version_no, "kind": "snapshot"},
+    )
+    await db.commit()
+    await db.refresh(version)
+    return version
 
 
 @router.post("/documents/{id}/submit-for-approval", response_model=SubmitForApprovalResponse)
@@ -144,11 +196,22 @@ async def submit_for_approval(
             detail="Document is already pending approval.",
         )
 
-    new_version_no = doc.current_version_no + 1
+    # Number after every existing version (snapshots included) so a submission
+    # never collides with a snapshot row's version_no.
+    max_no = (
+        await db.execute(
+            select(Version.version_no)
+            .where(Version.document_id == doc.id)
+            .order_by(Version.version_no.desc())
+        )
+    ).scalars().first() or 0
+    new_version_no = max(max_no, doc.current_version_no) + 1
     version = Version(
         id=uuid.uuid4(), org_id=current_user.org_id, document_id=doc.id,
         version_no=new_version_no, kind="submission",
         s3_key=f"versions/{doc.id}/v{new_version_no}", created_by=current_user.id,
+        # Frozen content at submit time (the editor sends its live Yjs value).
+        content=data.content,
         # Snapshot the policy at submit time so the in-flight chain is
         # deterministic even if the doc's policy is edited/detached mid-review.
         approval_policy_id=doc.approval_policy_id,

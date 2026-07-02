@@ -1,5 +1,5 @@
 {
-  "name": "docflow",
+  "name": "docolab",
   "version": "0.1.0",
   "private": true,
   "scripts": {
@@ -56,6 +56,7 @@
     "@radix-ui/react-popover": "^1.1.16",
     "@radix-ui/react-toolbar": "^1.1.12",
     "@slate-yjs/core": "^1.0.2",
+    "@slate-yjs/react": "^1.1.0",
     "@udecode/cn": "^52.3.4",
     "@uploadthing/react": "^7.3.3",
     "ai": "^6.0.205",

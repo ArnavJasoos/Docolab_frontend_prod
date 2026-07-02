@@ -1,155 +1,113 @@
 // =============================================================================
-// lib/api/snapshots.ts  —  Local version-content store (demo-grade).
+// lib/api/snapshots.ts — version-content store, backed by the REAL backend.
 //
-// The backend stores version *metadata* only (s3_key) and GET /versions/:id is
-// a stub, so it cannot return the actual document content needed to diff two
-// versions. This local store keeps the full Plate `Value` per saved version so
-// the "Compare documents" feature has real content to diff. Same swappable
-// localStorage seam as documents.ts / comments.ts.
+//   GET  /documents/{id}/versions   list version rows (metadata, no content)
+//   GET  /versions/{id}             one version incl. its frozen Slate content
+//   POST /documents/{id}/versions   freeze the current content (kind=snapshot)
+//
+// Replaces the old localStorage store (which was per-browser, seeded with demo
+// data, and invisible to collaborators). Version content now lives on the
+// backend `versions.content` JSONB column, so history/diff/restore work for
+// every user on every device.
 // =============================================================================
 
 import type { Value } from "platejs";
 
-import { latency, read, uid, write } from "@/lib/api/db";
+import { apiFetch } from "@/lib/api/client";
+import * as assignments from "@/lib/api/assignments";
 
 export interface DocSnapshot {
   id: string;
   docId: string;
   versionNo: number;
   label: string;
-  kind: "submission" | "approved";
+  kind: "submission" | "approved" | "rejected" | "snapshot";
   authorId: string;
   authorName: string;
   createdAt: string;
-  /** Full editor content captured at save time. */
-  value: Value;
+  /** Full editor content captured at save time (null on legacy rows). */
+  value: Value | null;
 }
 
-const keyFor = (docId: string) => `snapshots:${docId}`;
-const now = Date.now();
-const daysAgo = (n: number) => new Date(now - n * 86_400_000).toISOString();
-
-// ---------------------------------------------------------------------------
-// Seed: three progressively-edited versions of the "project-nexus" demo doc so
-// the compare view shows meaningful inserts (green) and deletions (red).
-// ---------------------------------------------------------------------------
-
-const nexusV1: Value = [
-  { type: "h1", children: [{ text: "Project Nexus: Strategic Initiative Q3" }] },
-  { type: "h2", children: [{ text: "1. Executive Summary" }] },
-  {
-    type: "p",
-    children: [
-      {
-        text: "Current market conditions require a change in how we approach enterprise collaboration. Project Nexus aims to connect structured documentation with real-time communication. We project a 18% increase in team velocity.",
-      },
-    ],
-  },
-  { type: "h2", children: [{ text: "1.1 Problem Statement" }] },
-  {
-    type: "p",
-    children: [
-      { text: "Data silos exist across departments. The marketing team uses " },
-      { text: "System Alpha", bold: true },
-      { text: ", while engineering uses System Gamma." },
-    ],
-  },
-  { type: "h3", children: [{ text: "Key Objectives" }] },
-  { type: "p", indent: 1, listStyleType: "disc", children: [{ text: "Eliminate redundant data entry across systems." }] },
-  { type: "p", indent: 1, listStyleType: "disc", children: [{ text: "Establish a single source of truth for product specifications." }] },
-];
-
-const nexusV2: Value = [
-  { type: "h1", children: [{ text: "Project Nexus: Strategic Initiative Q3" }] },
-  { type: "h2", children: [{ text: "1. Executive Summary" }] },
-  {
-    type: "p",
-    children: [
-      {
-        text: "The current market conditions necessitate a paradigm shift in how we approach enterprise collaboration. Project Nexus aims to bridge the gap between structured documentation and real-time communication. By unifying these paradigms, we project a 22% increase in cross-functional team velocity.",
-      },
-    ],
-  },
-  { type: "h2", children: [{ text: "1.1 Problem Statement" }] },
-  {
-    type: "p",
-    children: [
-      { text: "Data silos have become entrenched across departments. The marketing team utilizes " },
-      { text: "System Alpha", bold: true },
-      { text: ", while engineering is heavily invested in System Gamma. This bifurcation leads to outdated specifications being referenced in active sprints." },
-    ],
-  },
-  { type: "h3", children: [{ text: "Key Objectives" }] },
-  { type: "p", indent: 1, listStyleType: "disc", children: [{ text: "Eliminate redundant data entry across systems." }] },
-  { type: "p", indent: 1, listStyleType: "disc", children: [{ text: "Establish a single source of truth for product specifications." }] },
-  { type: "p", indent: 1, listStyleType: "disc", children: [{ text: "Integrate asynchronous review cycles natively." }] },
-];
-
-function seedFor(docId: string): DocSnapshot[] {
-  if (docId !== "project-nexus") return [];
-  return [
-    {
-      id: "snap-nexus-1",
-      docId,
-      versionNo: 1,
-      label: "Version 1 · Approved",
-      kind: "approved",
-      authorId: "marcus",
-      authorName: "Marcus Reed",
-      createdAt: daysAgo(6),
-      value: nexusV1,
-    },
-    {
-      id: "snap-nexus-2",
-      docId,
-      versionNo: 2,
-      label: "Version 2 · Approved",
-      kind: "approved",
-      authorId: "sarah",
-      authorName: "Sarah Chen",
-      createdAt: daysAgo(2),
-      value: nexusV2,
-    },
-  ];
+interface VersionRow {
+  id: string;
+  document_id: string;
+  version_no: number;
+  kind: DocSnapshot["kind"];
+  created_by: string;
+  created_at: string;
+  content?: Value | null;
 }
 
-/** List saved version snapshots for a document, newest first. */
+const KIND_LABEL: Record<DocSnapshot["kind"], string> = {
+  approved: "Approved",
+  submission: "Pending review",
+  rejected: "Rejected",
+  snapshot: "Snapshot",
+};
+
+function toSnapshot(v: VersionRow, names: Map<string, string>): DocSnapshot {
+  return {
+    id: v.id,
+    docId: v.document_id,
+    versionNo: v.version_no,
+    label: `Version ${v.version_no} · ${KIND_LABEL[v.kind] ?? v.kind}`,
+    kind: v.kind,
+    authorId: v.created_by,
+    authorName: names.get(v.created_by) ?? "Unknown",
+    createdAt: v.created_at,
+    value: v.content ?? null,
+  };
+}
+
+/** Best-effort id → display-name map from the org roster. */
+async function authorNames(): Promise<Map<string, string>> {
+  try {
+    const users = await assignments.listOrgUsers();
+    return new Map(users.map((u) => [u.id, u.display_name]));
+  } catch {
+    return new Map();
+  }
+}
+
+/** List saved version snapshots for a document, newest first (metadata only —
+ *  fetch content per version via getSnapshot when diffing/restoring). */
 export async function getSnapshots(docId: string): Promise<DocSnapshot[]> {
-  await latency(120);
-  const stored = read<DocSnapshot[] | null>(keyFor(docId), null);
-  if (stored) return [...stored].sort((a, b) => b.versionNo - a.versionNo);
-  const seed = seedFor(docId);
-  write(keyFor(docId), seed);
-  return [...seed].sort((a, b) => b.versionNo - a.versionNo);
+  const [data, names] = await Promise.all([
+    apiFetch<{ versions: VersionRow[] }>(`/documents/${docId}/versions`),
+    authorNames(),
+  ]);
+  return data.versions
+    .map((v) => toSnapshot(v, names))
+    .sort((a, b) => b.versionNo - a.versionNo);
 }
 
+/** Fetch one version INCLUDING its frozen content. */
 export async function getSnapshot(
   docId: string,
   id: string,
 ): Promise<DocSnapshot | null> {
-  const all = await getSnapshots(docId);
-  return all.find((s) => s.id === id) ?? null;
+  void docId; // the id is globally unique; kept for call-site compatibility
+  try {
+    const [v, names] = await Promise.all([
+      apiFetch<VersionRow & { content: Value | null }>(`/versions/${id}`),
+      authorNames(),
+    ]);
+    return toSnapshot(v, names);
+  } catch {
+    return null;
+  }
 }
 
-/** Capture the current content as a new version snapshot. */
+/** Freeze the current content as a new version (kind='snapshot'). */
 export async function saveSnapshot(
   docId: string,
   value: Value,
-  meta: { authorId: string; authorName: string; kind?: "submission" | "approved" },
 ): Promise<DocSnapshot> {
-  const existing = read<DocSnapshot[] | null>(keyFor(docId), null) ?? seedFor(docId);
-  const nextNo = existing.reduce((m, s) => Math.max(m, s.versionNo), 0) + 1;
-  const snap: DocSnapshot = {
-    id: uid("snap"),
-    docId,
-    versionNo: nextNo,
-    label: `Version ${nextNo} · Submission`,
-    kind: meta.kind ?? "submission",
-    authorId: meta.authorId,
-    authorName: meta.authorName,
-    createdAt: new Date().toISOString(),
-    value,
-  };
-  write(keyFor(docId), [...existing, snap]);
-  return snap;
+  const v = await apiFetch<VersionRow>(`/documents/${docId}/versions`, {
+    method: "POST",
+    body: JSON.stringify({ content: value }),
+  });
+  const names = await authorNames();
+  return toSnapshot(v, names);
 }

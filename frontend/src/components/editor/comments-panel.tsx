@@ -12,7 +12,6 @@ import { discussionPlugin } from "@/components/editor/plugins/discussion-kit";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Icon } from "@/components/icon";
 import { cn } from "@/lib/utils";
-import { uid } from "@/lib/api/db";
 import { saveDiscussions } from "@/lib/api/comments";
 import { useDocument } from "@/lib/store/document-store";
 
@@ -246,7 +245,8 @@ export function CommentsPanel() {
               comments: [
                 ...d.comments,
                 {
-                  id: uid("c"),
+                  // UUID so the reply persists to the backend under this id.
+                  id: crypto.randomUUID(),
                   userId: currentUserId,
                   discussionId: id,
                   contentRich: [{ type: "p", children: [{ text }] }],

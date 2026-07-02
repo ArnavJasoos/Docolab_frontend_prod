@@ -73,7 +73,7 @@ export function TopNav({
           className="flex items-center gap-2 font-display-sm text-display-sm font-bold text-primary"
         >
           <Icon name="description" fill className="text-[26px]" />
-          Docflow
+          Docolab
         </Link>
       </div>
 

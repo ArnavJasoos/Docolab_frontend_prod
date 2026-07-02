@@ -42,6 +42,8 @@ class AuditAction:
     RESOLVE_SUGGESTION = "resolve_suggestion"
     REJECT_SUGGESTION = "reject_suggestion"
     COMMENT_CREATE = "comment_create"
+    COMMENT_UPDATE = "comment_update"
+    COMMENT_DELETE = "comment_delete"
     RECOMMENDATION_CREATE = "recommendation_create"
     RECOMMENDATION_UPDATE = "recommendation_update"
     RECOMMENDATION_RESPONSE = "recommendation_response"

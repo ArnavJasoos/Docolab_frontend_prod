@@ -10,9 +10,20 @@ from pydantic import BaseModel, ConfigDict
 class CommentCreate(BaseModel):
     """Body for POST /documents/{id}/comments."""
     body: str
+    # Optional CLIENT-SUPPLIED id. The editor anchors comment marks inside the
+    # (Yjs-owned) document text keyed by comment id, so the id must be stable
+    # across client and backend — the client generates a UUID and sends it
+    # here. Also makes retries idempotent (same id → same row). NULL = the
+    # server generates one (backwards compatible).
+    id: Optional[uuid.UUID] = None
     anchor: Optional[dict] = None              # NULL = comment on whole doc
     suggestion_id: Optional[uuid.UUID] = None  # link to a suggestion, if any
     parent_comment_id: Optional[uuid.UUID] = None  # threading (self-reference)
+
+
+class CommentUpdate(BaseModel):
+    """Body for PATCH /comments/{id} (edit the comment text)."""
+    body: str
 
 
 # --- Responses --------------------------------------------------------------

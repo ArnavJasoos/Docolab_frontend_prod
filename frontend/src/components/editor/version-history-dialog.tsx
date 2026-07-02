@@ -2,6 +2,7 @@
 
 import * as React from "react";
 import { toast } from "sonner";
+import { useEditorRef } from "platejs/react";
 
 import {
   Dialog,
@@ -11,15 +12,13 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { Icon } from "@/components/icon";
-import { cn } from "@/lib/utils";
 import * as versions from "@/lib/api/versions";
 import {
+  getSnapshot,
   getSnapshots,
   saveSnapshot,
   type DocSnapshot,
 } from "@/lib/api/snapshots";
-import * as documentsApi from "@/lib/api/documents";
-import * as auth from "@/lib/api/auth";
 import { useDocumentOptional } from "@/lib/store/document-store";
 
 function when(iso: string) {
@@ -44,6 +43,12 @@ export function VersionHistoryDialog({
   onCompare: (snapshotId: string) => void;
 }) {
   const ctx = useDocumentOptional();
+  // The dialog renders inside <Plate>, so this is the LIVE (Yjs-canonical)
+  // editor — the only truthful source of current content. The REST document
+  // body is intentionally blank (content is collab-owned).
+  const editor = useEditorRef();
+  const canSubmit = ctx?.caps?.canSubmit ?? false;
+  const canEdit = ctx?.caps?.canEdit ?? false;
 
   const [list, setList] = React.useState<DocSnapshot[] | null>(null);
   const [restoring, setRestoring] = React.useState<string | null>(null);
@@ -54,10 +59,11 @@ export function VersionHistoryDialog({
     void getSnapshots(docId).then(setList);
   }, [docId]);
 
+  // The dialog is conditionally mounted by its parent (open ⇒ fresh state), so
+  // `list` starts at null (skeleton) on every open — no reset needed here.
   React.useEffect(() => {
     if (!open) return;
     let cancelled = false;
-    setList(null);
     void getSnapshots(docId).then((v) => {
       if (!cancelled) setList(v);
     });
@@ -66,17 +72,11 @@ export function VersionHistoryDialog({
     };
   }, [open, docId]);
 
-  // Capture the current document content as a new version snapshot.
+  // Capture the live editor content as a new backend version (kind=snapshot).
   const saveCurrent = async () => {
     setSaving(true);
     try {
-      const current = await documentsApi.getDocument(docId);
-      if (!current) throw new Error("missing");
-      const me = auth.getCurrentUser();
-      await saveSnapshot(docId, current.content, {
-        authorId: me?.id ?? "you",
-        authorName: me?.name ?? "You",
-      });
+      await saveSnapshot(docId, structuredClone(editor.children));
       toast.success("Saved current version");
       load();
     } catch {
@@ -86,40 +86,38 @@ export function VersionHistoryDialog({
     }
   };
 
-  // Submit for owner approval (governance, best-effort to backend) and also
-  // freeze a local snapshot so the demo version list reflects the submission.
+  // Submit for owner approval — freezes the live content on the submission row.
   const submit = async () => {
     setSubmitting(true);
     try {
-      await versions.submitForApproval(docId).catch(() => undefined);
-      const current = await documentsApi.getDocument(docId);
-      if (current) {
-        const me = auth.getCurrentUser();
-        await saveSnapshot(docId, current.content, {
-          authorId: me?.id ?? "you",
-          authorName: me?.name ?? "You",
-          kind: "submission",
-        });
-      }
+      await versions.submitForApproval(docId, structuredClone(editor.children));
       toast.success("Submitted for approval");
       ctx?.setStatus("Pending Review");
       load();
-    } catch {
-      toast.error("Couldn't submit for approval");
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Couldn't submit for approval");
     } finally {
       setSubmitting(false);
     }
   };
 
-  // Restore a snapshot as the current content, then reload to re-mount the editor.
+  // Restore a version by applying its frozen content to the LIVE editor: the
+  // change flows through Yjs to every connected client and persists via the
+  // collab server (no reload, no REST write).
   const restore = async (snap: DocSnapshot) => {
     setRestoring(snap.id);
     try {
-      await documentsApi.updateDocument(docId, { content: snap.value });
+      const full = snap.value ? snap : await getSnapshot(docId, snap.id);
+      if (!full?.value) {
+        toast.error("This version has no stored content to restore.");
+        return;
+      }
+      editor.tf.setValue(structuredClone(full.value));
       toast.success(`Restored ${snap.label}`);
-      if (typeof window !== "undefined") window.location.reload();
+      onOpenChange(false);
     } catch {
       toast.error("Couldn't restore version");
+    } finally {
       setRestoring(null);
     }
   };
@@ -146,24 +144,30 @@ export function VersionHistoryDialog({
           </DialogDescription>
         </DialogHeader>
 
-        <div className="flex gap-2 px-6 pb-3">
-          <button
-            onClick={() => void saveCurrent()}
-            disabled={saving}
-            className="flex flex-1 items-center justify-center gap-2 rounded-lg border border-border-subtle px-4 py-2 font-ui-sm text-ui-sm font-semibold text-text-primary transition-colors hover:bg-surface-container disabled:opacity-60"
-          >
-            <Icon name="bookmark_add" size={16} />
-            {saving ? "Saving…" : "Save version"}
-          </button>
-          <button
-            onClick={() => void submit()}
-            disabled={submitting}
-            className="flex flex-1 items-center justify-center gap-2 rounded-lg bg-primary-container px-4 py-2 font-ui-sm text-ui-sm font-semibold text-on-primary transition-colors hover:bg-accent-hover disabled:opacity-60"
-          >
-            <Icon name="send" size={16} />
-            {submitting ? "Submitting…" : "Submit for approval"}
-          </button>
-        </div>
+        {(canEdit || canSubmit) && (
+          <div className="flex gap-2 px-6 pb-3">
+            {canEdit && (
+              <button
+                onClick={() => void saveCurrent()}
+                disabled={saving}
+                className="flex flex-1 items-center justify-center gap-2 rounded-lg border border-border-subtle px-4 py-2 font-ui-sm text-ui-sm font-semibold text-text-primary transition-colors hover:bg-surface-container disabled:opacity-60"
+              >
+                <Icon name="bookmark_add" size={16} />
+                {saving ? "Saving…" : "Save version"}
+              </button>
+            )}
+            {canSubmit && (
+              <button
+                onClick={() => void submit()}
+                disabled={submitting}
+                className="flex flex-1 items-center justify-center gap-2 rounded-lg bg-primary-container px-4 py-2 font-ui-sm text-ui-sm font-semibold text-on-primary transition-colors hover:bg-accent-hover disabled:opacity-60"
+              >
+                <Icon name="send" size={16} />
+                {submitting ? "Submitting…" : "Submit for approval"}
+              </button>
+            )}
+          </div>
+        )}
 
         <div className="max-h-80 overflow-y-auto px-3 pb-3">
           {/* Current (live) row */}
@@ -219,13 +223,15 @@ export function VersionHistoryDialog({
                   <Icon name="difference" size={14} />
                   Compare
                 </button>
-                <button
-                  onClick={() => void restore(v)}
-                  disabled={restoring === v.id}
-                  className="rounded-md px-2.5 py-1 font-ui-xs text-ui-xs font-semibold text-text-secondary transition-colors hover:bg-surface-container disabled:opacity-60"
-                >
-                  {restoring === v.id ? "Restoring…" : "Restore"}
-                </button>
+                {canEdit && (
+                  <button
+                    onClick={() => void restore(v)}
+                    disabled={restoring === v.id}
+                    className="rounded-md px-2.5 py-1 font-ui-xs text-ui-xs font-semibold text-text-secondary transition-colors hover:bg-surface-container disabled:opacity-60"
+                  >
+                    {restoring === v.id ? "Restoring…" : "Restore"}
+                  </button>
+                )}
               </div>
             </div>
           ))}

@@ -4,13 +4,13 @@
 // Talks to the FastAPI Versioning & Approval cluster via apiFetch (./client),
 // which adds the base URL + Bearer token. Backend routes (canonical):
 //   GET  /documents/:id/versions
-//   POST /documents/:id/submit-for-approval
-//   POST /versions/:id/restore
+//   POST /documents/:id/submit-for-approval   (content = frozen Slate value)
+//   POST /versions/:id/approve | /reject
 //
-// NOTE: these calls require a valid auth token in localStorage["docflow.token"].
-// Until lib/api/auth.ts is wired to the real backend (to store a real JWT on
-// login), the backend will reject these with 401. See INTEGRATION_CHANGES.md.
+// Version CONTENT (list/save/diff/restore) lives in lib/api/snapshots.ts.
 // =============================================================================
+
+import type { Value } from "platejs";
 
 import type { DocVersion } from "@/lib/types";
 import { apiFetch } from "@/lib/api/client";
@@ -33,9 +33,9 @@ function toDocVersion(v: VersionResponse, isCurrent: boolean): DocVersion {
     label: `Version ${v.version_no} · ${kindLabel}`,
     createdAt: v.created_at,
     authorId: v.created_by,
-    // Backend returns the author id only; resolve to a display name once
-    // lib/api/users (GET /api/users) is wired. Shows the id for now.
-    authorName: v.created_by === "00000000-0000-0000-0000-0000000000aa" ? "You" : v.created_by,
+    // Author id only here — display surfaces resolve names via the org roster
+    // (see lib/api/snapshots.ts, which the version-history UI uses).
+    authorName: v.created_by,
     isCurrent,
     kind: v.kind,
     versionNo: v.version_no,
@@ -52,41 +52,17 @@ export async function listVersions(docId: string): Promise<DocVersion[]> {
 }
 
 /**
- * Snapshot the current doc as a new version.
- *
- * The backend has no generic "snapshot" endpoint — the only way to freeze a
- * version is to submit it for approval (kind="submission"). So this maps to
- * POST /documents/:id/submit-for-approval. `label` is currently ignored by the
- * backend (it derives the label from version_no/kind).
- */
-export async function snapshotVersion(
-  docId: string,
-  label: string,
-): Promise<DocVersion> {
-  const res = await apiFetch<{ version_id: string; version_no: number; message: string }>(
-    `/documents/${docId}/submit-for-approval`,
-    { method: "POST", body: "{}" },
-  );
-  return {
-    id: res.version_id,
-    label: label || `Version ${res.version_no} · Submission`,
-    createdAt: new Date().toISOString(),
-    authorId: "you",
-    authorName: "You",
-    isCurrent: true,
-  };
-}
-
-/**
  * Submit the live document for owner approval (freezes a warm submission).
- * Maps to POST /documents/:id/submit-for-approval.
+ * Maps to POST /documents/:id/submit-for-approval. Pass the editor's live
+ * content so the frozen submission is diffable in version history.
  */
 export async function submitForApproval(
   docId: string,
+  content?: Value,
 ): Promise<{ versionId: string; versionNo: number; message: string }> {
   const res = await apiFetch<{ version_id: string; version_no: number; message: string }>(
     `/documents/${docId}/submit-for-approval`,
-    { method: "POST", body: "{}" },
+    { method: "POST", body: JSON.stringify({ content: content ?? null }) },
   );
   return { versionId: res.version_id, versionNo: res.version_no, message: res.message };
 }
@@ -113,20 +89,7 @@ export async function rejectVersion(
   });
 }
 
-/**
- * Restore a version.
- *
- * NOTE: the backend POST /versions/:id/restore is section-scoped
- * (RestoreRequest.section_id), whereas the UI calls restoreVersion(docId,
- * versionId) to restore a whole snapshot. We send section_id="full" as a
- * stopgap — reconcile the semantics with the backend (see INTEGRATION_CHANGES).
- */
-export async function restoreVersion(
-  _docId: string,
-  versionId: string,
-): Promise<void> {
-  await apiFetch(`/versions/${versionId}/restore`, {
-    method: "POST",
-    body: JSON.stringify({ section_id: "full" }),
-  });
-}
+// NOTE: whole-version restore is now done client-side: the version dialog
+// loads the frozen content (lib/api/snapshots.ts::getSnapshot) and applies it
+// to the live editor, so the change propagates through Yjs to every client
+// and persists via the collab server — no REST restore round-trip needed.
