@@ -44,22 +44,40 @@ function DiffLeaf(props: PlateLeafProps) {
   const aiOn = usePluginOption(compareDiffPlugin, "aiOn") as boolean;
   const leaf = props.leaf as Record<string, unknown>;
   const op = (leaf.diffOperation as { type?: string } | undefined)?.type;
+  const isAi = aiOn && !!leaf[AI_EDIT_KEY];
 
-  // Blue (AI) overrides red/green: defer styling so the aiEdit leaf renders blue.
-  if (aiOn && leaf[AI_EDIT_KEY]) {
-    return <PlateLeaf {...props}>{props.children}</PlateLeaf>;
+  // Insertions belong to the new pane, deletions to the old pane. Hide the
+  // change on the opposite side so the two panes read as before → after.
+  if ((op === "insert" && side !== "new") || (op === "delete" && side !== "old")) {
+    return (
+      <PlateLeaf {...props}>
+        <span className="hidden">{props.children}</span>
+      </PlateLeaf>
+    );
+  }
+
+  // Blue (AI) overrides red/green. Owned here — not deferred to the aiEdit
+  // plugin — so it's deterministic regardless of leaf-plugin compose order.
+  // Deletions keep the strikethrough; the visible side was resolved above.
+  if (isAi) {
+    return (
+      <PlateLeaf {...props}>
+        <span
+          className={cn(
+            "rounded-sm bg-primary-container/25 text-text-primary",
+            op === "delete" && "line-through",
+          )}
+        >
+          {props.children}
+        </span>
+      </PlateLeaf>
+    );
   }
 
   if (op === "insert") {
     return (
       <PlateLeaf {...props}>
-        <span
-          className={cn(
-            side === "new"
-              ? "rounded-sm bg-insertion-bg text-insertion-text"
-              : "hidden",
-          )}
-        >
+        <span className="rounded-sm bg-insertion-bg text-insertion-text">
           {props.children}
         </span>
       </PlateLeaf>
@@ -69,13 +87,7 @@ function DiffLeaf(props: PlateLeafProps) {
   if (op === "delete") {
     return (
       <PlateLeaf {...props}>
-        <span
-          className={cn(
-            side === "old"
-              ? "rounded-sm bg-deletion-bg text-deletion-text line-through"
-              : "hidden",
-          )}
-        >
+        <span className="rounded-sm bg-deletion-bg text-deletion-text line-through">
           {props.children}
         </span>
       </PlateLeaf>
@@ -238,7 +250,13 @@ export function CompareView({
         getInsertProps: defaultGetInsertProps,
         getDeleteProps: defaultGetDeleteProps,
         getUpdateProps: defaultGetUpdateProps,
-        ignoreProps: [AI_EDIT_KEY],
+        // `id` MUST be ignored: live blocks carry a NodeIdPlugin `id` that the
+        // snapshot value doesn't match, so without this every edited paragraph
+        // failed node-matching and diffed as a whole-block delete+insert (the
+        // entire line struck red / painted green). Ignoring it lets same-type
+        // blocks pair and recurse into a character-level intra-line diff.
+        // `aiEdit` is ignored so attribution marks aren't seen as text changes.
+        ignoreProps: [AI_EDIT_KEY, "id"],
       });
       setSnapshot(snap);
       setDiffValue(value as Value);

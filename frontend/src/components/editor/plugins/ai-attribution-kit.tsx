@@ -19,9 +19,15 @@ import { AI_EDIT_KEY, type AiEditMark } from '@/lib/ai-attribution';
  */
 function AiEditLeaf(props: PlateLeafProps) {
   const show = usePluginOption(aiAttributionPlugin, 'show') as boolean;
-  const mark = (props.leaf as Record<string, unknown>)[AI_EDIT_KEY] as
-    | AiEditMark
-    | undefined;
+  const leaf = props.leaf as Record<string, unknown>;
+  const mark = leaf[AI_EDIT_KEY] as AiEditMark | undefined;
+
+  // In the compare view an AI leaf may also carry a diff op; there the diff
+  // plugin owns all colouring (blue included), so defer to it. Live-editor
+  // leaves never have `diff`, so this is a no-op outside compare.
+  if (leaf.diff) {
+    return <PlateLeaf {...props}>{props.children}</PlateLeaf>;
+  }
 
   if (!show || !mark) {
     return <PlateLeaf {...props}>{props.children}</PlateLeaf>;
