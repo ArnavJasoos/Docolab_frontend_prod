@@ -24,7 +24,6 @@ import { Icon } from "@/components/icon";
 import { cn } from "@/lib/utils";
 import { Editor, EditorContainer } from "@/components/ui/editor";
 import { BaseEditorKit } from "@/components/editor/editor-base-kit";
-import { aiAttributionPlugin } from "@/components/editor/plugins/ai-attribution-kit";
 import { AI_EDIT_KEY } from "@/lib/ai-attribution";
 import { getSnapshot, type DocSnapshot } from "@/lib/api/snapshots";
 
@@ -39,25 +38,33 @@ type Side = "old" | "new";
 // red/green with blue (the feature-1 ↔ feature-2 conflict rule).
 // ---------------------------------------------------------------------------
 
+// Single authority for leaf coloring so the result is deterministic: by
+// default every insertion is green and every deletion red REGARDLESS of author
+// (user or AI). When "Show AI edits" is on, AI-attributed changes are recolored
+// blue, overriding the green/red. We intentionally do NOT register the separate
+// aiAttributionPlugin in the compare panes — two isLeaf plugins claiming the
+// same leaf let the AI plugin (show=false → passthrough) swallow AI text so it
+// rendered with no green/red at all. Owning all three states here fixes that.
 function DiffLeaf(props: PlateLeafProps) {
   const side = usePluginOption(compareDiffPlugin, "side") as Side;
   const aiOn = usePluginOption(compareDiffPlugin, "aiOn") as boolean;
   const leaf = props.leaf as Record<string, unknown>;
   const op = (leaf.diffOperation as { type?: string } | undefined)?.type;
-
-  // Blue (AI) overrides red/green: defer styling so the aiEdit leaf renders blue.
-  if (aiOn && leaf[AI_EDIT_KEY]) {
-    return <PlateLeaf {...props}>{props.children}</PlateLeaf>;
-  }
+  const isAi = !!leaf[AI_EDIT_KEY];
+  // Blue overrides green/red only where there IS a change AND it was AI-authored.
+  const blue = aiOn && isAi;
 
   if (op === "insert") {
+    // Insertions live on the "new" side; hidden on "old".
+    if (side !== "new") return <PlateLeaf {...props}><span className="hidden">{props.children}</span></PlateLeaf>;
     return (
       <PlateLeaf {...props}>
         <span
           className={cn(
-            side === "new"
-              ? "rounded-sm bg-insertion-bg text-insertion-text"
-              : "hidden",
+            "rounded-sm",
+            blue
+              ? "bg-primary-container/25 text-text-primary"
+              : "bg-insertion-bg text-insertion-text",
           )}
         >
           {props.children}
@@ -67,13 +74,16 @@ function DiffLeaf(props: PlateLeafProps) {
   }
 
   if (op === "delete") {
+    // Deletions live on the "old" side; hidden on "new".
+    if (side !== "old") return <PlateLeaf {...props}><span className="hidden">{props.children}</span></PlateLeaf>;
     return (
       <PlateLeaf {...props}>
         <span
           className={cn(
-            side === "old"
-              ? "rounded-sm bg-deletion-bg text-deletion-text line-through"
-              : "hidden",
+            "rounded-sm line-through",
+            blue
+              ? "bg-primary-container/25 text-text-primary"
+              : "bg-deletion-bg text-deletion-text",
           )}
         >
           {props.children}
@@ -152,7 +162,6 @@ function ComparePane({
     {
       plugins: [
         ...BaseEditorKit,
-        aiAttributionPlugin,
         compareDiffPlugin.configure({ options: { side, aiOn } }),
         compareDiffBlockPlugin,
       ],
@@ -161,10 +170,10 @@ function ComparePane({
     [],
   );
 
-  // Keep the AI-override toggle live without re-creating the editor.
+  // Keep the AI-override toggle live without re-creating the editor. DiffLeaf
+  // reads `aiOn` off compareDiffPlugin and owns the blue override itself.
   React.useEffect(() => {
     editor.setOption(compareDiffPlugin, "aiOn", aiOn);
-    editor.setOption(aiAttributionPlugin, "show", aiOn);
   }, [editor, aiOn]);
 
   return (
@@ -222,6 +231,19 @@ export function CompareView({
       const base = createSlateEditor({ plugins: BaseEditorKit });
       const value = computeDiff(snap.value, current, {
         isInline: base.api.isInline,
+        // Character-level (intra-line) diff instead of whole-block replace.
+        // Without these, computeDiff's default node matcher gives up on an
+        // edited/reordered paragraph and emits a whole-block delete+insert —
+        // so removing a few characters struck the ENTIRE line red and painted
+        // its counterpart fully green. `elementsAreRelated` forces same-type
+        // blocks to be paired (→ recurse into an inline text diff of just the
+        // changed characters); `lineBreakChar` folds paragraph boundaries into
+        // the text stream so splits/merges diff as reflowing character ops.
+        // Returning null (not false) for different types keeps the default
+        // behaviour, so a paragraph vs. heading still renders as block insert/
+        // delete rather than a noisy char diff.
+        elementsAreRelated: (a, b) => (a.type === b.type ? true : null),
+        lineBreakChar: "\n",
         getInsertProps: defaultGetInsertProps,
         getDeleteProps: defaultGetDeleteProps,
         getUpdateProps: defaultGetUpdateProps,
