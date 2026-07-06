@@ -1,16 +1,13 @@
 import type { NextConfig } from "next";
 import withBundleAnalyzer from "@next/bundle-analyzer";
-import { fileURLToPath } from "node:url";
-import { dirname } from "node:path";
-
-const rootDir = dirname(fileURLToPath(import.meta.url));
 
 const nextConfig: NextConfig = {
   reactStrictMode: true,
   // Pin the workspace root — a stray package-lock.json in a parent directory
-  // otherwise makes Next infer the wrong root.
+  // otherwise makes Next infer the wrong root. dev/build always run from this
+  // frontend dir, so cwd is the correct root.
   turbopack: {
-    root: rootDir,
+    root: process.cwd(),
   },
 };
 
