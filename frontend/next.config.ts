@@ -3,7 +3,12 @@ import withBundleAnalyzer from "@next/bundle-analyzer";
 
 const nextConfig: NextConfig = {
   reactStrictMode: true,
-  /* add your other existing config options here */
+  // Pin the workspace root — a stray package-lock.json in a parent directory
+  // otherwise makes Next infer the wrong root. dev/build always run from this
+  // frontend dir, so cwd is the correct root.
+  turbopack: {
+    root: process.cwd(),
+  },
 };
 
 const bundleAnalyzer = withBundleAnalyzer({

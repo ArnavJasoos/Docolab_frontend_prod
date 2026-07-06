@@ -1,26 +1,25 @@
 'use client';
 
 import * as React from 'react';
+import dynamic from 'next/dynamic';
 
 import type { TExcalidrawElement } from '@platejs/excalidraw';
 import type { PlateElementProps } from 'platejs/react';
 
-import { useExcalidrawElement } from '@platejs/excalidraw/react';
-import { PlateElement, useReadOnly } from 'platejs/react';
+import { PlateElement } from 'platejs/react';
 
 import { cn } from '@/lib/utils';
 
-import '@excalidraw/excalidraw/index.css';
+// Defer the heavy Excalidraw runtime + CSS until a drawing actually renders.
+const ExcalidrawCanvas = dynamic(
+  () => import('./excalidraw-canvas').then((m) => m.ExcalidrawCanvas),
+  { ssr: false }
+);
 
 export function ExcalidrawElement(
   props: PlateElementProps<TExcalidrawElement>
 ) {
   const { children, element } = props;
-  const readOnly = useReadOnly();
-
-  const { Excalidraw, excalidrawProps } = useExcalidrawElement({
-    element,
-  });
 
   return (
     <PlateElement {...props}>
@@ -30,12 +29,7 @@ export function ExcalidrawElement(
             'mx-auto aspect-video h-[600px] w-[min(100%,600px)] overflow-hidden rounded-sm border'
           )}
         >
-          {Excalidraw && (
-            <Excalidraw
-              {...(excalidrawProps as any)}
-              viewModeEnabled={readOnly}
-            />
-          )}
+          <ExcalidrawCanvas element={element} />
         </div>
       </div>
       {children}

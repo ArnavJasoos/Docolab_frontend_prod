@@ -8,12 +8,7 @@
 // selectable, searchable text — not a flat bitmap.
 // =============================================================================
 
-import {
-  PDFDocument,
-  PDFFont,
-  StandardFonts,
-  rgb,
-} from "pdf-lib";
+import type { Color, PDFDocument, PDFFont } from "pdf-lib";
 import type { Value } from "platejs";
 
 type RichNode = {
@@ -32,9 +27,11 @@ type RichNode = {
 const PAGE = { width: 595.28, height: 841.89 }; // A4 portrait, points
 const MARGIN = 56;
 const CONTENT_WIDTH = PAGE.width - MARGIN * 2;
-const INK = rgb(0.06, 0.09, 0.16); // ~ text-primary
-const MUTED = rgb(0.4, 0.45, 0.5);
-const RULE = rgb(0.85, 0.87, 0.9);
+// Initialized inside renderDocumentPdf once pdf-lib's rgb() is dynamically
+// imported — keeps pdf-lib out of the eager editor bundle.
+let INK: Color;
+let MUTED: Color;
+let RULE: Color;
 
 interface Fonts {
   regular: PDFFont;
@@ -95,7 +92,7 @@ function drawRuns(
     size: number;
     x: number;
     maxWidth: number;
-    color?: ReturnType<typeof rgb>;
+    color?: Color;
     lineHeight?: number;
     forceFont?: PDFFont;
   },
@@ -208,6 +205,10 @@ function blockSpacingBefore(type?: string): number {
 
 /** Render a Slate document value into PDF bytes. */
 export async function renderDocumentPdf(value: Value, title: string): Promise<Uint8Array> {
+  const { PDFDocument, StandardFonts, rgb } = await import("pdf-lib");
+  INK = rgb(0.06, 0.09, 0.16); // ~ text-primary
+  MUTED = rgb(0.4, 0.45, 0.5);
+  RULE = rgb(0.85, 0.87, 0.9);
   const doc = await PDFDocument.create();
   doc.setTitle(title || "Document");
   const fonts: Fonts = {

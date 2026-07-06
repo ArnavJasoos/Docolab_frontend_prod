@@ -1,8 +1,12 @@
 'use client';
 
 import * as React from 'react';
+import dynamic from 'next/dynamic';
 import LiteYouTubeEmbed from 'react-lite-youtube-embed';
-import ReactPlayer from 'react-player';
+
+// react-player is heavy and only needed when a non-YouTube embed video renders.
+// Load it on demand so it stays out of the eager editor bundle.
+const ReactPlayer = dynamic(() => import('react-player'), { ssr: false });
 
 import type { TResizableProps, TVideoElement } from 'platejs';
 import type { PlateElementProps } from 'platejs/react';

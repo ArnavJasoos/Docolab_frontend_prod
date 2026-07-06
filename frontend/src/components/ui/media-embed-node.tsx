@@ -1,8 +1,14 @@
 'use client';
 
 import * as React from 'react';
+import dynamic from 'next/dynamic';
 import LiteYouTubeEmbed from 'react-lite-youtube-embed';
-import { Tweet } from 'react-tweet';
+
+// react-tweet is only needed when a tweet embed renders. Load on demand so it
+// stays out of the eager editor bundle.
+const Tweet = dynamic(() => import('react-tweet').then((m) => m.Tweet), {
+  ssr: false,
+});
 
 import type { TMediaEmbedElement } from 'platejs';
 import type { PlateElementProps } from 'platejs/react';
