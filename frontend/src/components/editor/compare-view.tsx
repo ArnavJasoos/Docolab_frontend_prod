@@ -24,6 +24,7 @@ import { Icon } from "@/components/icon";
 import { cn } from "@/lib/utils";
 import { Editor, EditorContainer } from "@/components/ui/editor";
 import { BaseEditorKit } from "@/components/editor/editor-base-kit";
+import { aiAttributionPlugin } from "@/components/editor/plugins/ai-attribution-kit";
 import { AI_EDIT_KEY } from "@/lib/ai-attribution";
 import { getSnapshot, type DocSnapshot } from "@/lib/api/snapshots";
 
@@ -38,33 +39,25 @@ type Side = "old" | "new";
 // red/green with blue (the feature-1 ↔ feature-2 conflict rule).
 // ---------------------------------------------------------------------------
 
-// Single authority for leaf coloring so the result is deterministic: by
-// default every insertion is green and every deletion red REGARDLESS of author
-// (user or AI). When "Show AI edits" is on, AI-attributed changes are recolored
-// blue, overriding the green/red. We intentionally do NOT register the separate
-// aiAttributionPlugin in the compare panes — two isLeaf plugins claiming the
-// same leaf let the AI plugin (show=false → passthrough) swallow AI text so it
-// rendered with no green/red at all. Owning all three states here fixes that.
 function DiffLeaf(props: PlateLeafProps) {
   const side = usePluginOption(compareDiffPlugin, "side") as Side;
   const aiOn = usePluginOption(compareDiffPlugin, "aiOn") as boolean;
   const leaf = props.leaf as Record<string, unknown>;
   const op = (leaf.diffOperation as { type?: string } | undefined)?.type;
-  const isAi = !!leaf[AI_EDIT_KEY];
-  // Blue overrides green/red only where there IS a change AND it was AI-authored.
-  const blue = aiOn && isAi;
+
+  // Blue (AI) overrides red/green: defer styling so the aiEdit leaf renders blue.
+  if (aiOn && leaf[AI_EDIT_KEY]) {
+    return <PlateLeaf {...props}>{props.children}</PlateLeaf>;
+  }
 
   if (op === "insert") {
-    // Insertions live on the "new" side; hidden on "old".
-    if (side !== "new") return <PlateLeaf {...props}><span className="hidden">{props.children}</span></PlateLeaf>;
     return (
       <PlateLeaf {...props}>
         <span
           className={cn(
-            "rounded-sm",
-            blue
-              ? "bg-primary-container/25 text-text-primary"
-              : "bg-insertion-bg text-insertion-text",
+            side === "new"
+              ? "rounded-sm bg-insertion-bg text-insertion-text"
+              : "hidden",
           )}
         >
           {props.children}
@@ -74,16 +67,13 @@ function DiffLeaf(props: PlateLeafProps) {
   }
 
   if (op === "delete") {
-    // Deletions live on the "old" side; hidden on "new".
-    if (side !== "old") return <PlateLeaf {...props}><span className="hidden">{props.children}</span></PlateLeaf>;
     return (
       <PlateLeaf {...props}>
         <span
           className={cn(
-            "rounded-sm line-through",
-            blue
-              ? "bg-primary-container/25 text-text-primary"
-              : "bg-deletion-bg text-deletion-text",
+            side === "old"
+              ? "rounded-sm bg-deletion-bg text-deletion-text line-through"
+              : "hidden",
           )}
         >
           {props.children}
@@ -162,6 +152,7 @@ function ComparePane({
     {
       plugins: [
         ...BaseEditorKit,
+        aiAttributionPlugin,
         compareDiffPlugin.configure({ options: { side, aiOn } }),
         compareDiffBlockPlugin,
       ],
@@ -170,10 +161,10 @@ function ComparePane({
     [],
   );
 
-  // Keep the AI-override toggle live without re-creating the editor. DiffLeaf
-  // reads `aiOn` off compareDiffPlugin and owns the blue override itself.
+  // Keep the AI-override toggle live without re-creating the editor.
   React.useEffect(() => {
     editor.setOption(compareDiffPlugin, "aiOn", aiOn);
+    editor.setOption(aiAttributionPlugin, "show", aiOn);
   }, [editor, aiOn]);
 
   return (
