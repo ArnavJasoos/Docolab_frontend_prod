@@ -1,0 +1,231 @@
+<!DOCTYPE html><html class="dark" lang="en"><head>
+<meta charset="utf-8">
+<meta content="width=device-width, initial-scale=1.0" name="viewport">
+<title>Docolab - Admin Login</title>
+<script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&amp;display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet">
+<script id="tailwind-config">
+      tailwind.config = {
+        darkMode: "class",
+        theme: {
+          extend: {
+            "colors": {
+                    "inverse-on-surface": "#0a0e1a",
+                    "surface-tint": "#7dd3fc",
+                    "secondary": "#88b4cc",
+                    "on-error-container": "#ffb3b3",
+                    "primary-container": "#0e4d6e",
+                    "outline-variant": "#2a3a48",
+                    "on-tertiary-fixed-variant": "#4d2a73",
+                    "background": "#0a0e1a",
+                    "inverse-primary": "#0a4c6e",
+                    "on-secondary-fixed": "#0d1f2b",
+                    "surface-dim": "#0f1524",
+                    "secondary-container": "#1a3a4e",
+                    "on-surface-variant": "#a0b4c4",
+                    "tertiary-fixed-dim": "#c8a0f0",
+                    "tertiary": "#c8a0f0",
+                    "on-primary-container": "#c8eaff",
+                    "on-primary": "#001f2e",
+                    "secondary-fixed-dim": "#88b4cc",
+                    "surface-container-highest": "#202c42",
+                    "on-tertiary-fixed": "#1a002e",
+                    "error-container": "#3d1414",
+                    "surface-container-low": "#111828",
+                    "on-error": "#1a0000",
+                    "inverse-surface": "#e0e8f0",
+                    "surface": "#0f1524",
+                    "on-secondary-container": "#c0d8e8",
+                    "on-primary-fixed-variant": "#004d73",
+                    "primary": "#7dd3fc",
+                    "error": "#ff6b6b",
+                    "primary-fixed": "#c8eaff",
+                    "tertiary-fixed": "#e8d0ff",
+                    "tertiary-container": "#3d2060",
+                    "primary-fixed-dim": "#7dd3fc",
+                    "on-tertiary": "#1a002e",
+                    "surface-container-lowest": "#0a0e1a",
+                    "secondary-fixed": "#c0d8e8",
+                    "on-secondary-fixed-variant": "#2a4a5e",
+                    "surface-container": "#141c2e",
+                    "on-surface": "#e0e8f0",
+                    "on-background": "#e0e8f0",
+                    "on-primary-fixed": "#001f2e",
+                    "surface-variant": "#1a2438",
+                    "outline": "#4a6070",
+                    "surface-bright": "#1a2438",
+                    "surface-container-high": "#1a2438",
+                    "on-tertiary-container": "#e8d0ff",
+                    "on-secondary": "#001f2e"
+            },
+            "borderRadius": {
+                    "DEFAULT": "0.5rem",
+                    "lg": "1rem",
+                    "xl": "1.5rem",
+                    "full": "9999px"
+            },
+            "fontFamily": {
+                    "headline": ["Inter", "sans-serif"],
+                    "display": ["Inter", "sans-serif"],
+                    "body": ["Inter", "sans-serif"],
+                    "label": ["Inter", "sans-serif"]
+            }
+          }
+        }
+      }
+    </script>
+<style>
+        body {
+            background-color: theme('colors.background');
+            background-image: 
+                radial-gradient(circle at 20% 30%, rgba(125, 211, 252, 0.08) 0%, transparent 40%),
+                radial-gradient(circle at 80% 70%, rgba(200, 160, 240, 0.05) 0%, transparent 40%);
+            min-height: 100vh;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-family: 'Inter', sans-serif;
+            color: theme('colors.on-surface');
+        }
+        
+        .glass-panel {
+            background: rgba(15, 21, 36, 0.6);
+            backdrop-filter: blur(24px);
+            -webkit-backdrop-filter: blur(24px);
+            border: 1px solid rgba(125, 211, 252, 0.1);
+            box-shadow: 0 0 30px rgba(125, 211, 252, 0.05), inset 0 0 20px rgba(125, 211, 252, 0.02);
+        }
+
+        .glass-input {
+            background: rgba(15, 21, 36, 0.4);
+            border: 1px solid rgba(125, 211, 252, 0.15);
+            color: theme('colors.on-surface');
+            transition: all 0.3s ease;
+        }
+
+        .glass-input:focus {
+            outline: none;
+            border-color: theme('colors.primary');
+            box-shadow: 0 0 15px rgba(125, 211, 252, 0.15);
+            background: rgba(15, 21, 36, 0.6);
+        }
+
+        .glass-button {
+            background: rgba(125, 211, 252, 0.15);
+            border: 1px solid rgba(125, 211, 252, 0.3);
+            color: theme('colors.primary');
+            backdrop-filter: blur(10px);
+            transition: all 0.3s ease;
+        }
+
+        .glass-button:hover {
+            background: rgba(125, 211, 252, 0.25);
+            box-shadow: 0 0 20px rgba(125, 211, 252, 0.2);
+            transform: translateY(-1px);
+        }
+        
+        .glass-button:active {
+            transform: translateY(1px);
+        }
+
+        /* Animated background glow */
+        .ambient-glow {
+            position: absolute;
+            width: 600px;
+            height: 600px;
+            background: radial-gradient(circle, rgba(125,211,252,0.03) 0%, rgba(10,14,26,0) 70%);
+            border-radius: 50%;
+            pointer-events: none;
+            z-index: -1;
+            animation: pulse 8s infinite alternate ease-in-out;
+        }
+
+        @keyframes pulse {
+            0% { transform: scale(0.9) translate(-5%, -5%); opacity: 0.5; }
+            100% { transform: scale(1.1) translate(5%, 5%); opacity: 1; }
+        }
+    </style>
+</head>
+<body class="antialiased overflow-hidden relative">
+<!-- Ambient animated background elements -->
+<div class="ambient-glow" style="top: -10%; left: -10%;"></div>
+<div class="ambient-glow" style="bottom: -20%; right: -10%; background: radial-gradient(circle, rgba(200,160,240,0.02) 0%, rgba(10,14,26,0) 70%); animation-delay: 4s;"></div>
+<!-- Main Content Canvas (No Nav Shell per rules for transactional page) -->
+<main class="w-full max-w-md px-6 relative z-10">
+<!-- Login Card -->
+<div class="glass-panel rounded-2xl p-8 sm:p-10 flex flex-col items-center">
+<!-- Brand / Logo Area -->
+<div class="mb-8 text-center">
+<div class="inline-flex items-center justify-center w-16 h-16 rounded-full bg-primary/10 border border-primary/20 mb-4 shadow-[0_0_20px_rgba(125,211,252,0.1)]">
+<span class="material-symbols-outlined text-3xl text-primary" style="font-variation-settings: 'FILL' 1;">
+                        admin_panel_settings
+                    </span>
+</div>
+<h1 class="text-3xl font-headline font-semibold tracking-tight text-on-surface mb-2">Docolab</h1>
+<p class="text-on-surface-variant text-sm font-body">System Controller Access</p>
+</div>
+<!-- Login Form -->
+<form action="#" class="w-full space-y-6" method="POST">
+<div class="space-y-4">
+<!-- Username Field -->
+<div class="relative group">
+<label class="sr-only" for="username">Username</label>
+<div class="absolute inset-y-0 left-0 pl-4 flex items-center pointer-events-none text-on-surface-variant group-focus-within:text-primary transition-colors">
+<span class="material-symbols-outlined text-xl">person</span>
+</div>
+<input class="glass-input block w-full pl-12 pr-4 py-3.5 rounded-lg text-sm font-body placeholder-on-surface-variant/50 focus:ring-0" id="username" name="username" placeholder="Admin Username" required="" type="text">
+</div>
+<!-- Password Field -->
+<div class="relative group">
+<label class="sr-only" for="password">Password</label>
+<div class="absolute inset-y-0 left-0 pl-4 flex items-center pointer-events-none text-on-surface-variant group-focus-within:text-primary transition-colors">
+<span class="material-symbols-outlined text-xl">lock</span>
+</div>
+<input class="glass-input block w-full pl-12 pr-4 py-3.5 rounded-lg text-sm font-body placeholder-on-surface-variant/50 focus:ring-0" id="password" name="password" placeholder="Secure Password" required="" type="password">
+</div>
+</div>
+<!-- Secondary Actions -->
+<div class="flex items-center justify-between text-xs font-body">
+<div class="flex items-center">
+<input class="h-4 w-4 rounded border-primary/20 bg-surface/40 text-primary focus:ring-primary focus:ring-offset-background cursor-pointer" id="remember-me" name="remember-me" type="checkbox">
+<label class="ml-2 block text-on-surface-variant cursor-pointer hover:text-on-surface transition-colors" for="remember-me">
+                            Remember session
+                        </label>
+</div>
+<a class="text-primary/80 hover:text-primary transition-colors font-medium" href="#">
+                        Forgot credentials?
+                    </a>
+</div>
+<!-- Primary CTA -->
+<button class="glass-button w-full flex justify-center items-center gap-2 py-3.5 px-4 rounded-lg text-sm font-semibold tracking-wide shadow-sm focus:outline-none focus:ring-2 focus:ring-primary focus:ring-offset-2 focus:ring-offset-background" type="submit">
+<span>Authenticate</span>
+<span class="material-symbols-outlined text-sm" style="font-variation-settings: 'FILL' 1;">login</span>
+</button>
+</form>
+<!-- Security Footer -->
+<div class="mt-8 flex items-center gap-2 text-on-surface-variant/50 text-xs font-body justify-center border-t border-primary/5 pt-6 w-full">
+<span class="material-symbols-outlined text-[14px]">shield</span>
+<p>End-to-end encrypted connection</p>
+</div>
+</div>
+</main>
+<script>
+        // Simple subtle mouse tracking effect for the background glows
+        document.addEventListener('mousemove', (e) => {
+            const x = e.clientX / window.innerWidth;
+            const y = e.clientY / window.innerHeight;
+            
+            const glows = document.querySelectorAll('.ambient-glow');
+            glows.forEach((glow, index) => {
+                const speed = index === 0 ? 30 : -20;
+                const xOffset = (x - 0.5) * speed;
+                const yOffset = (y - 0.5) * speed;
+                
+                // Add a very subtle transform based on mouse position
+                glow.style.transform = `translate(${xOffset}px, ${yOffset}px)`;
+            });
+        });
+    </script>
+</body></html>

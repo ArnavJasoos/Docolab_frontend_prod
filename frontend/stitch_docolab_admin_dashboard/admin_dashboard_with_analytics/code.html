@@ -1,0 +1,381 @@
+<!DOCTYPE html>
+
+<html class="dark" lang="en"><head>
+<meta charset="utf-8"/>
+<meta content="width=device-width, initial-scale=1.0" name="viewport"/>
+<title>Docolab - Admin Panel</title>
+<!-- Fonts -->
+<link href="https://fonts.googleapis.com" rel="preconnect"/>
+<link crossorigin="" href="https://fonts.gstatic.com" rel="preconnect"/>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&amp;display=swap" rel="stylesheet"/>
+<!-- Material Symbols -->
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<!-- Tailwind CSS -->
+<script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+<!-- Tailwind Configuration -->
+<script id="tailwind-config">
+        tailwind.config = {
+            darkMode: "class",
+            theme: {
+                extend: {
+                    "colors": {
+                        "inverse-on-surface": "#0a0e1a",
+                        "surface-tint": "#7dd3fc",
+                        "secondary": "#88b4cc",
+                        "on-error-container": "#ffb3b3",
+                        "primary-container": "#0e4d6e",
+                        "outline-variant": "#2a3a48",
+                        "on-tertiary-fixed-variant": "#4d2a73",
+                        "background": "#0a0e1a",
+                        "inverse-primary": "#0a4c6e",
+                        "on-secondary-fixed": "#0d1f2b",
+                        "surface-dim": "#0f1524",
+                        "secondary-container": "#1a3a4e",
+                        "on-surface-variant": "#a0b4c4",
+                        "tertiary-fixed-dim": "#c8a0f0",
+                        "tertiary": "#c8a0f0",
+                        "on-primary-container": "#c8eaff",
+                        "on-primary": "#001f2e",
+                        "secondary-fixed-dim": "#88b4cc",
+                        "surface-container-highest": "#202c42",
+                        "on-tertiary-fixed": "#1a002e",
+                        "error-container": "#3d1414",
+                        "surface-container-low": "#111828",
+                        "on-error": "#1a0000",
+                        "inverse-surface": "#e0e8f0",
+                        "surface": "#0f1524",
+                        "on-secondary-container": "#c0d8e8",
+                        "on-primary-fixed-variant": "#004d73",
+                        "primary": "#7dd3fc",
+                        "error": "#ff6b6b",
+                        "primary-fixed": "#c8eaff",
+                        "tertiary-fixed": "#e8d0ff",
+                        "tertiary-container": "#3d2060",
+                        "primary-fixed-dim": "#7dd3fc",
+                        "on-tertiary": "#1a002e",
+                        "surface-container-lowest": "#0a0e1a",
+                        "secondary-fixed": "#c0d8e8",
+                        "on-secondary-fixed-variant": "#2a4a5e",
+                        "surface-container": "#141c2e",
+                        "on-surface": "#e0e8f0",
+                        "on-background": "#e0e8f0",
+                        "on-primary-fixed": "#001f2e",
+                        "surface-variant": "#1a2438",
+                        "outline": "#4a6070",
+                        "surface-bright": "#1a2438",
+                        "surface-container-high": "#1a2438",
+                        "on-tertiary-container": "#e8d0ff",
+                        "on-secondary": "#001f2e"
+                    },
+                    "borderRadius": {
+                        "DEFAULT": "0.5rem",
+                        "lg": "1rem",
+                        "xl": "1.5rem",
+                        "full": "9999px"
+                    },
+                    "fontFamily": {
+                        "headline": ["Inter"],
+                        "display": ["Inter"],
+                        "body": ["Inter"],
+                        "label": ["Inter"]
+                    }
+                }
+            }
+        }
+    </script>
+<style>
+        .material-symbols-outlined {
+            font-variation-settings: 'FILL' 0, 'wght' 300, 'GRAD' 0, 'opsz' 24;
+        }
+        .material-symbols-outlined.fill {
+            font-variation-settings: 'FILL' 1, 'wght' 300, 'GRAD' 0, 'opsz' 24;
+        }
+        
+        /* Custom Scrollbar for Glass Aesthetic */
+        ::-webkit-scrollbar {
+            width: 8px;
+            height: 8px;
+        }
+        ::-webkit-scrollbar-track {
+            background: rgba(15, 21, 36, 0.2); 
+        }
+        ::-webkit-scrollbar-thumb {
+            background: rgba(125, 211, 252, 0.2); 
+            border-radius: 4px;
+        }
+        ::-webkit-scrollbar-thumb:hover {
+            background: rgba(125, 211, 252, 0.4); 
+        }
+    </style>
+</head>
+<body class="bg-background text-on-surface font-body min-h-screen overflow-x-hidden selection:bg-primary/30 selection:text-primary-fixed">
+<!-- Ambient Background Glows -->
+<div class="fixed top-[-20%] left-[-10%] w-[50vw] h-[50vw] rounded-full bg-primary/5 blur-[120px] pointer-events-none z-0"></div>
+<div class="fixed bottom-[-10%] right-[-5%] w-[40vw] h-[40vw] rounded-full bg-tertiary/5 blur-[100px] pointer-events-none z-0"></div>
+<!-- TopNavBar -->
+<header class="bg-surface/60 backdrop-blur-xl border-b border-primary/10 shadow-[0_0_30px_rgba(125,211,252,0.05)] flex justify-between items-center px-6 h-16 w-full fixed top-0 z-50">
+<!-- Brand -->
+<div class="flex items-center gap-3">
+<span class="material-symbols-outlined text-primary text-2xl" data-weight="fill">hexagon</span>
+<span class="text-xl font-headline font-semibold tracking-tight text-primary">Docolab</span>
+</div>
+<!-- Central Search -->
+<div class="hidden md:flex flex-1 max-w-xl mx-8 relative group">
+<span class="material-symbols-outlined absolute left-4 top-1/2 -translate-y-1/2 text-on-surface-variant group-focus-within:text-primary transition-colors">search</span>
+<input class="w-full bg-surface-variant/40 border border-primary/10 focus:border-primary/30 focus:ring-1 focus:ring-primary/30 rounded-full py-2 pl-12 pr-4 text-sm text-on-surface placeholder:text-on-surface-variant transition-all backdrop-blur-md outline-none shadow-[inset_0_2px_4px_rgba(0,0,0,0.2)]" placeholder="Search documents, users, or settings..." type="text"/>
+<div class="absolute right-3 top-1/2 -translate-y-1/2 flex items-center gap-1">
+<kbd class="hidden lg:inline-block px-2 py-0.5 text-[10px] font-mono text-on-surface-variant bg-surface-container rounded border border-primary/10">⌘</kbd>
+<kbd class="hidden lg:inline-block px-2 py-0.5 text-[10px] font-mono text-on-surface-variant bg-surface-container rounded border border-primary/10">K</kbd>
+</div>
+</div>
+<!-- Trailing Action -->
+<button class="flex items-center gap-3 hover:bg-primary/10 hover:text-primary transition-colors p-1.5 pr-3 rounded-full active:scale-95 duration-200 border border-transparent hover:border-primary/20 group">
+<img alt="Admin Avatar" class="w-8 h-8 rounded-full object-cover border border-primary/20 shadow-[0_0_10px_rgba(125,211,252,0.2)]" data-alt="A professional headshot of a female tech executive, late 30s, looking directly at the camera with a confident expression. The lighting is cinematic and cool-toned, reflecting a modern, high-tech corporate environment. A subtle ice-blue rim light highlights her features, complementing the dark atmospheric background. Shot on 85mm lens, sharp focus." src="https://lh3.googleusercontent.com/aida-public/AB6AXuBqlbjgcoAm57W72G1S8jki6X3f3a90LaICCX6CQyV9qfofvIjFvuQHstMmCwYVktuwJAE7LuqCL3NOWq2rP9YdhZ2fCoFfw3azYJ46o4UhOowlQSZ7llW6U1dUX9yIdAKy34LqDl4aMNypSXR7ynnmaf0c9Mi-uGBBLt-RHnB6eWJvPjVYdtQbs0YvQxHavVGNzIylmWRLcYi-XpUTADYMkKP2J0nZS1L3LzQlP340PmdnBEFoLwiO"/>
+<span class="text-sm font-medium text-on-surface group-hover:text-primary transition-colors hidden sm:block">Admin Account</span>
+</button>
+</header>
+<!-- Main Content Canvas -->
+<main class="flex-1 pt-16 min-h-screen relative z-10 flex flex-col w-full">
+<!-- Page Header -->
+<div class="px-8 py-6 pb-2">
+<h1 class="text-2xl font-headline font-semibold text-on-surface tracking-tight flex items-center gap-3">
+<span class="w-1.5 h-6 rounded-full bg-primary shadow-[0_0_10px_rgba(125,211,252,0.6)]"></span>
+                System Overview
+            </h1>
+</div>
+<div class="flex-1 p-8 pt-4">
+<div class="grid grid-cols-1 lg:grid-cols-10 gap-8 h-full">
+<!-- Left Column: Users Section (30%) -->
+<div class="lg:col-span-3 flex flex-col gap-4">
+<!-- Glass Card -->
+<div class="bg-surface/60 backdrop-blur-2xl border border-primary/10 rounded-xl flex-1 flex flex-col overflow-hidden shadow-[0_4px_30px_rgba(0,0,0,0.3)] relative group">
+<!-- Card Header -->
+<div class="px-6 py-5 border-b border-primary/10 flex justify-between items-center bg-surface-container/30">
+<h3 class="font-headline font-medium text-on-surface flex items-center gap-2">
+<span class="material-symbols-outlined text-primary/80 text-sm">groups</span>
+                                Active Directory
+                            </h3>
+<button class="bg-primary/10 hover:bg-primary/20 text-primary border border-primary/20 rounded-md py-1.5 px-3 flex items-center gap-1.5 transition-colors">
+<span class="material-symbols-outlined text-[16px]">person_add</span>
+<span class="text-xs font-medium">Add User</span>
+</button>
+</div>
+<!-- List Container -->
+<div class="flex-1 overflow-y-auto p-2 space-y-1 h-64">
+<!-- User Item -->
+<div class="flex items-center gap-4 p-3 rounded-lg hover:bg-surface-variant/40 transition-colors cursor-pointer group/item border border-transparent hover:border-primary/5">
+<div class="relative">
+<img alt="User Avatar" class="w-10 h-10 rounded-full object-cover border border-primary/20" data-alt="A professional portrait of a male software developer, early 30s, wearing casual smart attire. He is positioned against a deep, dark navy background with subtle volumetric lighting. A soft, frosty cyan glow gently illuminates one side of his face, creating a moody, premium glassmorphism aesthetic. Crisp detail, highly realistic." src="https://lh3.googleusercontent.com/aida-public/AB6AXuAAwE5D1frXgTWuV8S0LiRnI2kFvnCm4RHXUHsV14XNYIri0Ur_Tkwqz4ZDlKRkoYgVsqU3OX0dJP4A8QxNqTmaRzWEFjks3t4SOG7Jbl_mJKPLJ_Tnw3D-aqZUKQLliHo1xpWizXRQ033pXoIS9PI6Vsu-FoSHiJSst9VofvRLiS_MDw-XfETW-glzRClKP3c-ONiawyfCxBzb2vOPHi8zrsjikdQhxhuwMohsL-SdrGC7faPtotId"/>
+<span class="absolute bottom-0 right-0 w-3 h-3 bg-green-400 border-2 border-surface rounded-full shadow-[0_0_8px_rgba(74,222,128,0.5)]"></span>
+</div>
+<div class="flex-1 min-w-0">
+<p class="text-sm font-medium text-on-surface truncate group-hover/item:text-primary transition-colors">Marcus Chen</p>
+<p class="text-xs text-on-surface-variant truncate">Lead Engineer</p>
+</div>
+<span class="material-symbols-outlined text-on-surface-variant opacity-0 group-hover/item:opacity-100 transition-opacity text-sm">chevron_right</span>
+</div>
+<!-- User Item -->
+<div class="flex items-center gap-4 p-3 rounded-lg hover:bg-surface-variant/40 transition-colors cursor-pointer group/item border border-transparent hover:border-primary/5">
+<div class="relative">
+<img alt="User Avatar" class="w-10 h-10 rounded-full object-cover border border-primary/20" data-alt="A sleek, modern avatar of a non-binary product manager. The portrait features moody, low-key lighting with striking ice-blue accents reflecting off their glasses. The background is a blurred, dark cinematic expanse, evoking a sense of deep technological space and frozen light. Photorealistic, 4k resolution, high contrast." src="https://lh3.googleusercontent.com/aida-public/AB6AXuBTAeQx655021h1A4TClX4BKbTxw-wdmOpTrnYvakd5UTGDNVii2KO_vUZjasOFsxdoW9FkTOkUFHC3Z50-HMk3BXIOYqrj_jknBrZXyGY8-gOdnsO5jc8sDcKvaU2AaSrtVsiSWUyyIfWG9OOE4bzdXM4_0Qo0XZsJb_WZ0Lsv7GacsB7k_HrFa0cLBvKjyxQNYAXvhAvkfnFkqsoGdaDusU7XsnT3Px74s2Zprw-fs-jNAFxkntba"/>
+<span class="absolute bottom-0 right-0 w-3 h-3 bg-secondary-fixed-dim border-2 border-surface rounded-full"></span>
+</div>
+<div class="flex-1 min-w-0">
+<p class="text-sm font-medium text-on-surface truncate group-hover/item:text-primary transition-colors">Elena Rodriguez</p>
+<p class="text-xs text-on-surface-variant truncate">Product Director</p>
+</div>
+<span class="text-xs text-on-surface-variant">2h ago</span>
+</div>
+<!-- User Item -->
+<div class="flex items-center gap-4 p-3 rounded-lg hover:bg-surface-variant/40 transition-colors cursor-pointer group/item border border-transparent hover:border-primary/5">
+<div class="relative">
+<div class="w-10 h-10 rounded-full bg-primary-container text-on-primary-container flex items-center justify-center font-bold text-sm border border-primary/20">
+                                        JS
+                                    </div>
+<span class="absolute bottom-0 right-0 w-3 h-3 bg-green-400 border-2 border-surface rounded-full shadow-[0_0_8px_rgba(74,222,128,0.5)]"></span>
+</div>
+<div class="flex-1 min-w-0">
+<p class="text-sm font-medium text-on-surface truncate group-hover/item:text-primary transition-colors">James Smith</p>
+<p class="text-xs text-on-surface-variant truncate">Security Analyst</p>
+</div>
+<span class="material-symbols-outlined text-on-surface-variant opacity-0 group-hover/item:opacity-100 transition-opacity text-sm">chevron_right</span>
+</div>
+</div>
+<!-- Hover Glow Effect -->
+<div class="absolute inset-0 border border-primary/0 group-hover:border-primary/20 rounded-xl pointer-events-none transition-colors duration-500"></div>
+</div>
+<div class="flex flex-col gap-4">
+<!-- AI Model Distribution -->
+<div class="bg-surface/60 backdrop-blur-2xl border border-primary/10 rounded-xl p-5 shadow-[0_4px_30px_rgba(0,0,0,0.3)] relative group">
+<h3 class="font-headline font-medium text-on-surface flex items-center gap-2 mb-4">
+<span class="material-symbols-outlined text-primary/80 text-sm">pie_chart</span>
+      AI Model Distribution
+    </h3>
+<div class="flex items-center justify-center h-32 relative">
+<!-- Mock Pie Chart -->
+<div class="w-24 h-24 rounded-full border-8 border-primary/20 border-t-primary border-r-tertiary shadow-[0_0_20px_rgba(125,211,252,0.1)]"></div>
+<div class="absolute flex flex-col items-center">
+<span class="text-xs font-bold text-primary">72%</span>
+</div>
+</div>
+<div class="mt-4 space-y-2">
+<div class="flex justify-between text-xs">
+<span class="text-on-surface-variant">GPT-4 Glacier</span>
+<span class="text-primary">45%</span>
+</div>
+<div class="flex justify-between text-xs">
+<span class="text-on-surface-variant">Claude 3 Opus</span>
+<span class="text-tertiary">27%</span>
+</div>
+</div>
+</div>
+<!-- API Cost Summary -->
+<div class="bg-surface/60 backdrop-blur-2xl border border-primary/10 rounded-xl p-5 shadow-[0_4px_30px_rgba(0,0,0,0.3)] relative group">
+<h3 class="font-headline font-medium text-on-surface flex items-center gap-2 mb-4">
+<span class="material-symbols-outlined text-primary/80 text-sm">payments</span>
+      API Cost Summary
+    </h3>
+<div class="space-y-3">
+<div class="flex justify-between items-center p-2 rounded-lg bg-surface-variant/30 border border-primary/5">
+<span class="text-xs text-on-surface">GPT-4</span>
+<span class="text-sm font-mono text-primary">$1,240.50</span>
+</div>
+<div class="flex justify-between items-center p-2 rounded-lg bg-surface-variant/30 border border-primary/5">
+<span class="text-xs text-on-surface">Claude 3</span>
+<span class="text-sm font-mono text-primary">$842.20</span>
+</div>
+</div>
+</div>
+<!-- Top 5 Documents by Cost -->
+<div class="bg-surface/60 backdrop-blur-2xl border border-primary/10 rounded-xl p-5 shadow-[0_4px_30px_rgba(0,0,0,0.3)] relative group">
+<h3 class="font-headline font-medium text-on-surface flex items-center gap-2 mb-4">
+<span class="material-symbols-outlined text-primary/80 text-sm">bar_chart</span>
+      Top Documents by Cost
+    </h3>
+<div class="space-y-3">
+<div class="space-y-1">
+<div class="flex justify-between text-[10px] text-on-surface-variant">
+<span class="truncate">Q3_Financial_Report.pdf</span>
+<span>$42.10</span>
+</div>
+<div class="h-1.5 w-full bg-surface-variant/40 rounded-full overflow-hidden">
+<div class="h-full bg-primary shadow-[0_0_8px_rgba(125,211,252,0.4)]" style="width: 90%"></div>
+</div>
+</div>
+<div class="space-y-1">
+<div class="flex justify-between text-[10px] text-on-surface-variant">
+<span class="truncate">Legal_Review_v2.docx</span>
+<span>$38.45</span>
+</div>
+<div class="h-1.5 w-full bg-surface-variant/40 rounded-full overflow-hidden">
+<div class="h-full bg-primary/70" style="width: 75%"></div>
+</div>
+</div>
+<div class="space-y-1">
+<div class="flex justify-between text-[10px] text-on-surface-variant">
+<span class="truncate">Market_Analysis.pptx</span>
+<span>$22.15</span>
+</div>
+<div class="h-1.5 w-full bg-surface-variant/40 rounded-full overflow-hidden">
+<div class="h-full bg-primary/50" style="width: 45%"></div>
+</div>
+</div>
+</div>
+</div>
+</div></div>
+<!-- Right Column: Documents Section (70%) -->
+<div class="lg:col-span-7 flex flex-col gap-4">
+<!-- Glass Card -->
+<div class="bg-surface/60 backdrop-blur-2xl border border-primary/10 rounded-xl flex-1 flex flex-col overflow-hidden shadow-[0_4px_30px_rgba(0,0,0,0.3)] relative group">
+<!-- Explorer Header -->
+<div class="px-6 py-4 border-b border-primary/10 bg-surface-container/30 flex justify-between items-center">
+<!-- Breadcrumb -->
+<div class="flex items-center gap-2 text-sm">
+<a class="text-on-surface-variant hover:text-primary transition-colors flex items-center gap-1" href="#">
+<span class="material-symbols-outlined text-[18px]">home</span>
+</a>
+<span class="text-on-surface-variant/50">/</span>
+<a class="text-on-surface-variant hover:text-primary transition-colors font-medium" href="#">Engineering</a>
+<span class="text-on-surface-variant/50">/</span>
+<span class="text-primary font-medium">Q3 Specs</span>
+</div>
+<!-- Actions -->
+<div class="flex items-center gap-2">
+<button class="bg-primary/10 hover:bg-primary/20 text-primary border border-primary/20 rounded-md py-1.5 px-3 flex items-center gap-1.5 transition-colors">
+<span class="material-symbols-outlined text-[18px]">note_add</span>
+<span class="text-xs font-medium">New Document</span>
+</button>
+<button class="bg-primary/10 hover:bg-primary/20 text-primary border border-primary/20 rounded-md py-1.5 px-3 flex items-center gap-1.5 transition-colors">
+<span class="material-symbols-outlined text-[18px]">create_new_folder</span>
+<span class="text-xs font-medium">New Folder</span>
+</button>
+<div class="w-px h-5 bg-primary/10 mx-1"></div>
+<button class="p-1.5 rounded-md hover:bg-surface-variant/50 text-on-surface-variant hover:text-primary transition-colors border border-transparent hover:border-primary/20">
+<span class="material-symbols-outlined text-[20px]">view_list</span>
+</button>
+<button class="p-1.5 rounded-md bg-primary/10 text-primary hover:bg-primary/20 transition-colors border border-primary/20">
+<span class="material-symbols-outlined text-[20px]">grid_view</span>
+</button>
+<div class="w-px h-5 bg-primary/10 mx-1"></div>
+<button class="p-1.5 rounded-md hover:bg-surface-variant/50 text-on-surface-variant hover:text-primary transition-colors border border-transparent hover:border-primary/20">
+<span class="material-symbols-outlined text-[20px]">filter_list</span>
+</button>
+</div>
+</div>
+<!-- File Grid -->
+<div class="flex-1 overflow-y-auto p-6 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6 content-start">
+<!-- Folder Card -->
+<div class="flex flex-col items-center justify-center p-6 border border-primary/5 rounded-xl hover:bg-surface-variant/30 hover:border-primary/20 transition-all cursor-pointer group/card bg-surface-container/20 text-center gap-3 relative">
+<div class="absolute top-3 right-3 opacity-0 group-hover/card:opacity-100 transition-opacity">
+<button class="text-on-surface-variant hover:text-primary"><span class="material-symbols-outlined text-[18px]">more_vert</span></button>
+</div>
+<span class="material-symbols-outlined text-secondary text-5xl" data-weight="fill">folder</span>
+<div>
+<p class="font-medium text-sm text-on-surface group-hover/card:text-primary transition-colors">Archived Projects</p>
+<p class="text-xs text-on-surface-variant mt-1">Oct 12, 2023</p>
+</div>
+</div>
+<!-- File Card -->
+<div class="flex flex-col items-center justify-center p-6 border border-primary/5 rounded-xl hover:bg-surface-variant/30 hover:border-primary/20 transition-all cursor-pointer group/card bg-surface-container/20 text-center gap-3 relative">
+<div class="absolute top-3 right-3 opacity-0 group-hover/card:opacity-100 transition-opacity">
+<button class="text-on-surface-variant hover:text-primary"><span class="material-symbols-outlined text-[18px]">download</span></button>
+</div>
+<span class="material-symbols-outlined text-primary/70 text-5xl">description</span>
+<div>
+<p class="font-medium text-sm text-on-surface group-hover/card:text-primary transition-colors">API_v2_Documentation.pdf</p>
+<p class="text-xs text-on-surface-variant mt-1">2.4 MB • Yesterday</p>
+</div>
+</div>
+<!-- File Card -->
+<div class="flex flex-col items-center justify-center p-6 border border-primary/5 rounded-xl hover:bg-surface-variant/30 hover:border-primary/20 transition-all cursor-pointer group/card bg-primary/5 text-center gap-3 relative">
+<div class="absolute top-3 right-3 opacity-0 group-hover/card:opacity-100 transition-opacity flex gap-2">
+<button class="text-on-surface-variant hover:text-primary"><span class="material-symbols-outlined text-[18px]">visibility</span></button>
+<button class="text-on-surface-variant hover:text-primary"><span class="material-symbols-outlined text-[18px]">more_vert</span></button>
+</div>
+<span class="material-symbols-outlined text-tertiary text-5xl">image</span>
+<div>
+<p class="font-medium text-sm text-on-surface group-hover/card:text-primary transition-colors">Architecture_Diagram.png</p>
+<p class="text-xs text-on-surface-variant mt-1">856 KB • Today</p>
+</div>
+</div>
+<!-- File Card -->
+<div class="flex flex-col items-center justify-center p-6 border border-primary/5 rounded-xl hover:bg-surface-variant/30 hover:border-primary/20 transition-all cursor-pointer group/card bg-surface-container/20 text-center gap-3 relative">
+<div class="absolute top-3 right-3 opacity-0 group-hover/card:opacity-100 transition-opacity">
+<button class="text-on-surface-variant hover:text-primary"><span class="material-symbols-outlined text-[18px]">download</span></button>
+</div>
+<span class="material-symbols-outlined text-green-400/70 text-5xl">table_chart</span>
+<div>
+<p class="font-medium text-sm text-on-surface group-hover/card:text-primary transition-colors">Q3_Resource_Allocation.xlsx</p>
+<p class="text-xs text-on-surface-variant mt-1">1.2 MB • Nov 01, 2023</p>
+</div>
+</div>
+</div>
+<!-- Hover Glow Effect -->
+<div class="absolute inset-0 border border-primary/0 group-hover:border-primary/20 rounded-xl pointer-events-none transition-colors duration-500"></div>
+</div>
+</div>
+</div>
+</div>
+</main>
+</body></html>
