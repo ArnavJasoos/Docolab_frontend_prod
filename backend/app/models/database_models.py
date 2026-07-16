@@ -58,10 +58,11 @@ class User(Base):
     status:        Mapped[str]       = mapped_column(Text, nullable=False, server_default="active")
     # AI model this user's editor should use, resolved against the org catalog
     # (ai_models). Per-USER assignment (admin-managed) — replaces the old
-    # per-document choice. Defaults to the enabled Gemini model. Free-form string
-    # so new catalog keys need no migration; the resolver falls back to the org
-    # default if the value is unknown/disabled.
-    ai_model:      Mapped[str]       = mapped_column(Text, nullable=False, server_default="gemini-2.5-flash")
+    # per-document choice. Holds the Ask-AI router's 'provider:model_key'
+    # identifier (e.g. 'groq:llama_70b'). Empty = the admin never chose one, so
+    # the resolver falls back to the org default — as it also does when the
+    # value is unknown or has been disabled.
+    ai_model:      Mapped[str]       = mapped_column(Text, nullable=False, server_default="")
     # PRESENCE: last time this user pinged the heartbeat endpoint. NULL = never
     # seen. "online" is a derived value (last_seen_at within a short window) —
     # computed in the presence service, not stored, so it can't go stale.
@@ -218,10 +219,10 @@ class Document(Base):
     # leaving the document. Distinct from `versions` (permanent/append-only)
     # so casual editing never bloats version history. NULL until first save.
     content_snapshot:   Mapped[Optional[list]]   = mapped_column(JSONB, nullable=True)
-    # AI model the editor should use for this document. Admin-assignable
-    # (Admin page, per-doc); defaults to a Gemini model so existing behaviour is
-    # unchanged. Free-form string so new model ids need no migration.
-    ai_model:           Mapped[str]              = mapped_column(Text, nullable=False, server_default="gemini-2.5-flash")
+    # LEGACY: the model choice is per-USER now (users.ai_model), which is what
+    # the Ask-AI path resolves. Retained only so existing rows and the admin
+    # document list keep their shape; nothing reads it to pick a model.
+    ai_model:           Mapped[str]              = mapped_column(Text, nullable=False, server_default="")
     approval_policy_id: Mapped[Optional[uuid.UUID]] = mapped_column(UUID(as_uuid=True), ForeignKey("approval_policies.id"))
     created_by:         Mapped[uuid.UUID]        = mapped_column(UUID(as_uuid=True), ForeignKey("users.id"), nullable=False)
     created_at:         Mapped[datetime]         = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now())
@@ -300,22 +301,27 @@ class DocumentFolder(Base):
 
 class AiModel(Base):
     """
-    Org-scoped catalog of AI models an admin may assign to documents. This is
-    the governed allow-list behind documents.ai_model — a doc stores a
-    `model_key` (e.g. 'gemini-2.5-flash') that must resolve to an ENABLED row
-    here. Vendor API keys are NOT stored here (they live only on the AI gateway
-    service); this table records only which vendor+model are permitted.
+    Org-scoped catalog of AI models an admin may assign to users. This is the
+    governed allow-list behind users.ai_model — a user stores a `model_key`
+    that must resolve to an ENABLED row here.
 
-    `is_default` marks the org fallback used when a document's assigned model is
-    missing or disabled, so AI never hard-fails on a stale value.
+    Rows are DERIVED from the Ask-AI router's config.yaml (see
+    ai_model_service.seed_catalog), so `model_key` is the router's own
+    'provider:model_key' identifier and every assignable model is by
+    construction callable. config.yaml decides what exists; this table decides,
+    per org, what is enabled and which model is the default. Vendor API keys are
+    NOT stored here — they live only in backend/.env.
+
+    `is_default` marks the org fallback used when a user's assigned model is
+    unset, missing, or disabled, so AI never hard-fails on a stale value.
     UNIQUE (org_id, model_key) keeps the catalog free of duplicates.
     """
     __tablename__ = "ai_models"
 
     id:           Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=_uuid)
     org_id:       Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False)
-    vendor:       Mapped[str]       = mapped_column(Text, nullable=False)   # google / openai / anthropic / ...
-    model_key:    Mapped[str]       = mapped_column(Text, nullable=False)   # e.g. gemini-2.5-flash
+    vendor:       Mapped[str]       = mapped_column(Text, nullable=False)   # groq / gemini / nvidia
+    model_key:    Mapped[str]       = mapped_column(Text, nullable=False)   # e.g. groq:llama_70b
     display_name: Mapped[str]       = mapped_column(Text, nullable=False)
     enabled:      Mapped[bool]      = mapped_column(Boolean, nullable=False, server_default="true")
     is_default:   Mapped[bool]      = mapped_column(Boolean, nullable=False, server_default="false")
@@ -330,16 +336,20 @@ class AiModel(Base):
 
 class AiUsageEvent(Base):
     """
-    One row per AI model call, reported by the ai-gateway AFTER it sees the
-    vendor's real token counts. This is the metering behind the Admin "Model
-    Usage" section (usage % by model, token totals per model, top documents by
-    usage).
+    One row per AI model call, written by the Ask-AI endpoint (app/api/ai.py)
+    once the vendor reports its real token counts. This is the metering behind
+    the Admin "Model Usage" section (usage % by model, token totals per model,
+    top documents by usage).
 
-    Trust model: the gateway authenticates to the backend with a service JWT and
-    also forwards the original AI grant, from which the backend derives org /
-    document / user / vendor / model — the gateway cannot fabricate attribution.
-    `request_id` (gateway-generated, one per upstream call) makes the write
-    idempotent so a retry never double-counts.
+    Trust model: attribution is never taken from the client. org / user come from
+    the caller's authenticated session and vendor / model from the backend's own
+    resolution of users.ai_model, so a client cannot bill usage to someone else.
+    document_id is the one client-supplied field and is validated against the
+    caller's org before use. `request_id` is generated per call and unique, so a
+    retry can never double-count.
+
+    (The legacy /api/internal/ai/usage ingest — used when an external ai-gateway
+    made the vendor call — still writes this table under a service JWT + grant.)
 
     Tokens-only for now; per-token pricing (and a derived cost column) is a
     deliberate later addition — no schema churn needed to add it.

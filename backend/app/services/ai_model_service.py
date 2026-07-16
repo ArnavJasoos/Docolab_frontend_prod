@@ -2,13 +2,19 @@
 # app/services/ai_model_service.py
 # The single place that reasons about the org AI-model catalog (ai_models).
 #
-# documents.ai_model stores a model_key; this service resolves that key against
-# the ENABLED catalog and, crucially, falls back to the org default when the
-# key is missing or has been disabled — so an admin disabling a model, or a
-# stale value, can never hard-fail AI in the editor.
+# users.ai_model stores a model_key; this service resolves that key against the
+# ENABLED catalog and, crucially, falls back to the org default when the key is
+# missing or has been disabled — so an admin disabling a model, or a stale
+# value, can never hard-fail AI in the editor.
 #
-# Vendor API keys live ONLY on the AI gateway service, never here — this layer
-# governs *which* vendor+model are permitted, not *how* to call them.
+# The catalog is DERIVED from the Ask-AI router's config.yaml: a model_key here
+# is the router's own 'provider:model_key' identifier (e.g. 'groq:llama_70b'),
+# so anything an admin can assign is by construction something the router can
+# call. config.yaml decides what EXISTS; this table decides, per org, what is
+# ENABLED and which model is the default.
+#
+# Vendor API keys live only in backend/.env (expanded into config.yaml at load
+# time) — this layer governs *which* model is permitted, not *how* to call it.
 # =============================================================================
 
 from typing import Optional
@@ -17,18 +23,24 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.database_models import AiModel
+from app.services.ask_ai.model_registry import ModelRegistry
 
-# Seed catalog for a fresh org. Only Gemini is enabled by default (it is what
-# the editor runs today and the only vendor with a configured key pre-gateway);
-# the rest are disabled placeholders an admin can turn on once the gateway holds
-# their keys. `default=True` marks the org fallback.
-SEED_CATALOG = [
-    {"vendor": "google",    "model_key": "gemini-2.5-flash", "display_name": "Gemini 2.5 Flash", "enabled": True,  "is_default": True},
-    {"vendor": "google",    "model_key": "gemini-2.5-pro",   "display_name": "Gemini 2.5 Pro",   "enabled": True,  "is_default": False},
-    {"vendor": "openai",    "model_key": "gpt-4o-mini",      "display_name": "GPT-4o mini",      "enabled": False, "is_default": False},
-    {"vendor": "openai",    "model_key": "gpt-4o",           "display_name": "GPT-4o",           "enabled": False, "is_default": False},
-    {"vendor": "anthropic", "model_key": "claude-sonnet-4",  "display_name": "Claude Sonnet 4",  "enabled": False, "is_default": False},
-]
+
+def seed_catalog() -> list[dict]:
+    """The rows a fresh org's catalog starts with: every model configured in the
+    Ask-AI router, all enabled, with the router's own default_model flagged as
+    the org default."""
+    default_model_id = ModelRegistry.default_model()
+    return [
+        {
+            "vendor": entry["vendor"],
+            "model_key": entry["model_id"],
+            "display_name": entry["display_name"],
+            "enabled": True,
+            "is_default": entry["model_id"] == default_model_id,
+        }
+        for entry in ModelRegistry.list_catalog()
+    ]
 
 
 async def list_models(db: AsyncSession, org_id, only_enabled: bool = False) -> list[AiModel]:
@@ -77,12 +89,23 @@ async def resolve(db: AsyncSession, org_id, model_key: str) -> Optional[AiModel]
 
 
 async def seed_org_catalog(db: AsyncSession, org_id) -> None:
-    """Idempotently seed SEED_CATALOG for an org (only if it has no models yet).
-    Queued on the given session; the caller commits."""
-    existing = (
-        await db.execute(select(AiModel).where(AiModel.org_id == org_id))
-    ).scalars().first()
-    if existing is not None:
-        return
-    for row in SEED_CATALOG:
-        db.add(AiModel(org_id=org_id, **row))
+    """Reconcile an org's catalog with the router's config.yaml, idempotently.
+
+    Models newly added to config.yaml are inserted; rows the admin already has
+    are left untouched, so their enabled/is_default choices survive a restart.
+    Rows whose model_key no longer exists in config.yaml are NOT deleted here —
+    resolve() already falls back for them, and dropping a row would silently
+    discard an admin's assignment. Queued on the given session; caller commits.
+    """
+    rows = seed_catalog()
+    existing_keys = set((
+        await db.execute(select(AiModel.model_key).where(AiModel.org_id == org_id))
+    ).scalars().all())
+
+    # Only claim the default flag on a fresh catalog — never override an admin's
+    # later choice of default.
+    fresh = not existing_keys
+    for row in rows:
+        if row["model_key"] in existing_keys:
+            continue
+        db.add(AiModel(org_id=org_id, **{**row, "is_default": row["is_default"] and fresh}))

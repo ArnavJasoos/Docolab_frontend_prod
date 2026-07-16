@@ -1,4 +1,4 @@
-from src.llm.prompt_templates import DOC_PROMPT, NO_CONTEXT_PROMPT
+from app.services.ask_ai.prompt_templates import DOC_PROMPT, NO_CONTEXT_PROMPT
 
 
 def build_messages(context: str, query: str, history: list | None = None) -> list:

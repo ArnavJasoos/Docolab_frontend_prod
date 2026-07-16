@@ -1,8 +1,8 @@
 from litellm import completion
 
-from src.llm.model_registry import ModelRegistry
-from src.llm.prompt_templates import SUMMARY_PROMPT
-from src.llm.exceptions import ContextWindowExceededError, ProviderError
+from app.services.ask_ai.model_registry import ModelRegistry
+from app.services.ask_ai.prompt_templates import SUMMARY_PROMPT
+from app.services.ask_ai.exceptions import ContextWindowExceededError, ProviderError
 
 
 class ContextManager:

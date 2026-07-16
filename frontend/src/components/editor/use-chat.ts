@@ -19,6 +19,8 @@ import { toast } from 'sonner';
 
 import { aiChatPlugin } from '@/components/editor/plugins/ai-kit';
 import { getCurrentUser } from '@/lib/api/auth';
+import { getFreshToken } from '@/lib/api/client';
+import { useDocumentOptional } from '@/lib/store/document-store';
 
 import { discussionPlugin } from './plugins/discussion-kit';
 
@@ -51,14 +53,13 @@ export type Chat = UseChatHelpers<ChatMessage>;
 
 export type ChatMessage = UIMessage<unknown, MessageDataPart>;
 
-/** localStorage key holding the user's Ask-AI model pick ('provider:model_key'). */
-export const AI_MODEL_STORAGE_KEY = 'docolab.ai-model';
-
 function createChatTransport({
   api,
+  documentId,
   editor,
 }: {
   api: string;
+  documentId?: string;
   editor: PlateEditor;
 }) {
   return new DefaultChatTransport({
@@ -68,25 +69,31 @@ function createChatTransport({
 
       const initBody = JSON.parse(init?.body as string);
 
-      // Ask-AI service contract: the session is unique per user (multi-turn
-      // memory), and the model is whatever the user picked in the AI menu
-      // (empty → the service's default model).
+      // The session is unique per user (the backend keys multi-turn memory off
+      // it). The MODEL is deliberately absent: it is the admin's per-user
+      // assignment, resolved server-side. documentId only attributes usage in
+      // the admin's Model Usage metering.
       const sessionId = getCurrentUser()?.id ?? 'anonymous';
-      const model =
-        typeof window !== 'undefined'
-          ? window.localStorage.getItem(AI_MODEL_STORAGE_KEY) || undefined
-          : undefined;
 
       const body = {
         ...initBody,
         ...bodyOptions,
-        model,
+        documentId,
         sessionId,
       };
+
+      // The route is a server-side proxy to the backend's /ai/ask; it needs the
+      // caller's token to act as them (the backend resolves *their* assigned
+      // model and meters usage against them).
+      const token = await getFreshToken();
 
       const res = await fetch(input, {
         ...init,
         body: JSON.stringify(body),
+        headers: {
+          ...init?.headers,
+          ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        },
       });
 
       if (!res.ok) {
@@ -111,14 +118,18 @@ function createChatTransport({
 export const useChat = () => {
   const editor = useEditorRef();
   const options = usePluginOption(aiChatPlugin, 'chatOptions');
+  // Optional: the editor also renders outside a DocumentProvider (previews),
+  // where usage simply isn't attributed to a document.
+  const documentId = useDocumentOptional()?.docId;
 
   const transport = React.useMemo(
     () =>
       createChatTransport({
         api: options.api || '/api/ai/command',
+        documentId,
         editor,
       }),
-    [editor, options.api]
+    [editor, options.api, documentId]
   );
 
   const chat = useBaseChat<ChatMessage>({

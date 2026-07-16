@@ -17,7 +17,7 @@ import threading
 import time
 from collections import deque
 
-from src.llm.exceptions import RateLimitExceededError
+from app.services.ask_ai.exceptions import RateLimitExceededError
 
 MINUTE = 60
 DAY = 86400

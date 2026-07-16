@@ -51,6 +51,7 @@ from app.services.presence_service import is_online
 from app.services.audit_service import record_audit, AuditAction
 from app.services.token_service import issue_refresh_token, prune_user_tokens
 from app.services import ai_model_service
+from app.services.ask_ai.model_registry import ModelRegistry
 
 router = APIRouter()
 
@@ -764,12 +765,20 @@ async def admin_add_ai_model(
     db: AsyncSession = Depends(get_db),
     admin: User = Depends(require_org_admin),
 ):
-    """Add a vendor+model to the org catalog. Its API key is configured out of
-    band on the AI gateway — this only records that the model is permitted."""
+    """Add a model to the org catalog. The model_key must be one the Ask-AI
+    router is actually configured to call (a 'provider:model_key' from its
+    config.yaml) — otherwise an admin could assign a user a model that fails on
+    every request. Adding new models to config.yaml is an operator action; this
+    only records that an existing one is permitted for this org."""
     model_key = data.model_key.strip()
     vendor = data.vendor.strip()
     if not model_key or not vendor or not data.display_name.strip():
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="vendor, model_key, display_name required")
+    if model_key not in ModelRegistry.list_available_models():
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"'{model_key}' is not a model the AI router is configured to call",
+        )
     if await ai_model_service.get_by_key(db, admin.org_id, model_key):
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=f"Model '{model_key}' already in catalog")
 

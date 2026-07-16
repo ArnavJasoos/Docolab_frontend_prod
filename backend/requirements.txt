@@ -21,5 +21,14 @@ bcrypt==4.0.1
 # passlib needs the argon2_cffi backend installed or hashing/verifying fails.
 argon2-cffi>=23.1.0
 
+# Ask-AI LLM router (app/services/ask_ai): multi-provider completion +
+# token counting. `groq` is litellm's SDK dependency for the Groq provider.
+# Capped below 1.92: that release ships no wheel for Python 3.13, so pip falls
+# back to building it from source and fails without a Rust toolchain. Raise the
+# cap once 1.92+ publishes 3.13 wheels.
+litellm>=1.40.0,<1.92.0
+groq>=0.9.0
+pyyaml>=6.0
+
 # Testing / HTTP client
 httpx>=0.27.0

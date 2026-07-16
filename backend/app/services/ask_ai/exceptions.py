@@ -44,3 +44,23 @@ class InvalidModelError(Exception):
     def __init__(self, model: str):
         self.model = model
         super().__init__(f"Model '{model}' is not configured.")
+
+
+class MissingApiKeyError(Exception):
+    """Raised when a model's provider has no API key in the environment.
+
+    Distinct from InvalidModelError: the model is configured correctly, the
+    deployment just has no key for its provider. Caught before the vendor call
+    so the operator gets 'set GROQ_API_KEY' rather than the vendor's opaque
+    'API key not valid' (an unset ${VAR} expands to the literal placeholder,
+    which would otherwise be sent upstream as if it were a real key).
+    """
+
+    def __init__(self, model: str, provider: str, env_var: str | None = None):
+        self.model = model
+        self.provider = provider
+        self.env_var = env_var
+        hint = f" Set {env_var} in backend/.env." if env_var else ""
+        super().__init__(
+            f"No API key configured for provider '{provider}' (model '{model}').{hint}"
+        )

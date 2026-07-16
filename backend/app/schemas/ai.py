@@ -1,4 +1,4 @@
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from typing import Optional
 
 
@@ -68,6 +68,45 @@ class AIUsageReportRequest(BaseModel):
 class AIUsageReportResponse(BaseModel):
     recorded: bool          # False if this request_id was already recorded
     request_id: str
+
+
+class AskRequest(BaseModel):
+    """An Ask-AI call from the editor.
+
+    Note there is deliberately NO `model` field: the model is governed by the
+    admin (users.ai_model) and resolved server-side, so a client cannot pick an
+    ungoverned model or bypass another user's assignment.
+    """
+    query: str = Field(..., min_length=1, description="What the user typed, or the Ask-AI action's instruction")
+    context: Optional[str] = Field(default=None, description="The selected document section, if any")
+    session_id: Optional[str] = Field(default=None, description="Conversation id for multi-turn memory")
+    document_id: Optional[str] = Field(default=None, description="Document the call belongs to — attributes usage")
+
+
+class AskResponse(BaseModel):
+    response: str
+    model: str              # the resolved 'provider:model_key'
+    display_name: str
+    is_fallback: bool       # true if the user's assigned model was unset/disabled
+    session_id: Optional[str] = None
+    input_tokens: int
+    output_tokens: int
+    context_compressed: bool = False
+
+
+class AskModelItem(BaseModel):
+    model_key: str
+    vendor: str
+    display_name: str
+
+
+class AskModelsResponse(BaseModel):
+    """What the editor shows the user: their admin-assigned model. The catalog is
+    included as read-only context (assignment is an admin action)."""
+    assigned_model: str
+    display_name: str
+    is_fallback: bool
+    models: list[AskModelItem]
 
 
 class AIGrantResponse(BaseModel):

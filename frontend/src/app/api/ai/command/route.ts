@@ -2,23 +2,28 @@
 // app/api/ai/command/route.ts
 //
 // Ask-AI command route. The Plate editor (AIChatPlugin / use-chat) posts here;
-// this route translates the editor request into the standalone Ask-AI
-// service's `POST /ask` contract and converts the JSON answer back into the
-// UI-message stream the editor already consumes — so the existing streaming
-// insert, suggestion diffing, and Accept / Reject flows keep working
-// unchanged on top of the new backend.
+// this route turns the editor request into the backend's `POST /ai/ask`
+// contract and converts the JSON answer back into the UI-message stream the
+// editor already consumes — so streaming insert, suggestion diffing, and the
+// Accept / Reject flow keep working unchanged.
 //
-//   POST {ASK_AI_URL}/ask
-//   { "query": ..., "context": ..., "model": ..., "session_id": ... }
+// This route exists purely to BUILD THE PROMPT: the Plate-specific work
+// (serializing the selection to markdown, choosing the edit/comment/table
+// prompt) needs the editor's plugin kit, so it cannot move into the Python
+// backend. It holds no secrets and makes no model choice — it forwards the
+// caller's own token to the backend, which is the single AI entry point:
 //
-// - query      → what the user typed, or the instruction behind the Ask-AI
-//                action the user clicked (fix grammar, make longer, ...).
-// - context    → the section of the document the user selected.
-// - model      → the user's model pick ('provider:model_key'); empty = the
-//                service's default_model.
-// - session_id → unique per user (multi-turn memory lives in the service).
+//   POST {NEXT_PUBLIC_API_URL}/ai/ask   (Authorization: the user's bearer token)
+//   { "query": ..., "context": ..., "session_id": ..., "document_id": ... }
 //
-// Vendor keys live ONLY in ask-ai-service/.env — nothing AI-secret is here.
+// - query       → what the user typed, or the instruction behind the Ask-AI
+//                 action the user clicked (fix grammar, make longer, ...).
+// - context     → the section of the document the user selected.
+// - session_id  → unique per user (multi-turn memory lives in the backend).
+// - document_id → attributes token usage in Admin > Model Usage.
+//
+// The MODEL is not sent: the backend resolves the admin's per-user assignment
+// (users.ai_model). Vendor keys live only in backend/.env.
 // =============================================================================
 
 import type { NextRequest } from 'next/server';
@@ -48,14 +53,10 @@ import {
 // function up to 60s before the platform kills the request. No effect in dev.
 export const maxDuration = 60;
 
-const ASK_AI_URL = (process.env.ASK_AI_URL || 'http://localhost:8001').replace(
-  /\/+$/,
-  ''
-);
-// Optional shared secret matching the service's ASK_AI_SERVICE_TOKEN. When
-// both sides set it, /ask calls carry it as a Bearer token; when unset the
-// request is sent exactly as before.
-const ASK_AI_SERVICE_TOKEN = process.env.ASK_AI_SERVICE_TOKEN;
+// The same backend base URL every other frontend call uses (lib/api/client.ts).
+const API_URL = (
+  process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000/api'
+).replace(/\/+$/, '');
 
 /** Directive appended to prompts whose answer must be machine-parseable. */
 const JSON_ONLY_RULE =
@@ -63,8 +64,11 @@ const JSON_ONLY_RULE =
 
 interface AskResponse {
   context_compressed: boolean;
+  display_name: string;
   input_tokens: number;
+  is_fallback: boolean;
   model: string;
+  output_tokens: number;
   response: string;
   session_id?: string | null;
 }
@@ -101,22 +105,21 @@ function detailToMessage(status: number, detail: unknown): string {
 async function askAI(
   payload: {
     context: string;
-    model?: string;
+    document_id?: string;
     query: string;
     session_id?: string;
   },
+  authorization: string,
   signal: AbortSignal
 ): Promise<AskResponse> {
   let res: Response;
 
   try {
-    res = await fetch(`${ASK_AI_URL}/ask`, {
+    res = await fetch(`${API_URL}/ai/ask`, {
       body: JSON.stringify(payload),
       headers: {
+        Authorization: authorization,
         'Content-Type': 'application/json',
-        ...(ASK_AI_SERVICE_TOKEN
-          ? { Authorization: `Bearer ${ASK_AI_SERVICE_TOKEN}` }
-          : {}),
       },
       method: 'POST',
       signal,
@@ -126,7 +129,7 @@ async function askAI(
 
     throw new AskAIError(
       502,
-      `Ask-AI service is unreachable at ${ASK_AI_URL}. Is ask-ai-service running?`
+      `The backend is unreachable at ${API_URL}. Is it running?`
     );
   }
 
@@ -169,7 +172,18 @@ function* chunkText(text: string, size = 48): Generator<string> {
 }
 
 export async function POST(req: NextRequest) {
-  const { ctx, messages: messagesRaw, model, sessionId } = await req.json();
+  // The backend is the AI entry point and it authenticates as the user, so an
+  // unauthenticated call can never reach a model.
+  const authorization = req.headers.get('authorization');
+
+  if (!authorization) {
+    return NextResponse.json(
+      { error: 'You must be signed in to use AI.' },
+      { status: 401 }
+    );
+  }
+
+  const { ctx, documentId, messages: messagesRaw, sessionId } = await req.json();
 
   const {
     children,
@@ -247,10 +261,11 @@ export async function POST(req: NextRequest) {
     ask = await askAI(
       {
         context,
-        model: model || undefined,
+        document_id: documentId ? String(documentId) : undefined,
         query,
         session_id: useSession && sessionId ? String(sessionId) : undefined,
       },
+      authorization,
       req.signal
     );
   } catch (error) {

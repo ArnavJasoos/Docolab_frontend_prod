@@ -66,7 +66,7 @@ import {
 } from '@/components/ui/popover';
 import { cn } from '@/lib/utils';
 import { commentPlugin } from '@/components/editor/plugins/comment-kit';
-import { AI_MODEL_STORAGE_KEY } from '@/components/editor/use-chat';
+import { getFreshToken } from '@/lib/api/client';
 
 import { AIChatEditor } from './ai-chat-editor';
 
@@ -249,46 +249,48 @@ export function AIMenu() {
             </CommandList>
           )}
 
-          {!isLoading && <AIModelSelect />}
+          {!isLoading && <AIModelLabel />}
         </Command>
       </PopoverContent>
     </Popover>
   );
 }
 
-/** Model catalog from /api/ai/models, cached for the page's lifetime. */
-let cachedModels: string[] | null = null;
+/** The signed-in user's assigned model, cached for the page's lifetime. */
+let cachedAssignedModel: string | null = null;
 
 /**
- * Compact model picker shown at the bottom of the Ask-AI popup. The choice is
- * kept in localStorage and sent as `model` on every /ask call ("Default" =
- * let the service use its config default).
+ * Shows which AI model this user's editor is using, at the bottom of the Ask-AI
+ * popup. Read-only: the model is assigned per user by an admin (Admin > Users >
+ * AI Model) and resolved server-side, so there is nothing to pick here.
  */
-function AIModelSelect() {
-  const [models, setModels] = React.useState<string[]>(cachedModels ?? []);
-  const [model, setModel] = React.useState(() =>
-    typeof window === 'undefined'
-      ? ''
-      : (window.localStorage.getItem(AI_MODEL_STORAGE_KEY) ?? '')
-  );
+function AIModelLabel() {
+  const [label, setLabel] = React.useState<string | null>(cachedAssignedModel);
 
   React.useEffect(() => {
-    if (cachedModels) return;
+    if (cachedAssignedModel) return;
 
     let cancelled = false;
 
     void (async () => {
       try {
-        const res = await fetch('/api/ai/models');
+        const token = await getFreshToken();
+
+        if (!token) return;
+
+        const res = await fetch('/api/ai/models', {
+          headers: { Authorization: `Bearer ${token}` },
+        });
 
         if (!res.ok) return;
 
         const data = await res.json();
-        cachedModels = data.available_models ?? [];
+        cachedAssignedModel = data.display_name || data.assigned_model || null;
 
-        if (!cancelled) setModels(cachedModels!);
+        if (!cancelled && cachedAssignedModel) setLabel(cachedAssignedModel);
       } catch {
-        // service down — picker simply doesn't render
+        // Unresolvable — the label simply doesn't render; the request itself
+        // still works (the backend resolves the model regardless).
       }
     })();
 
@@ -297,33 +299,14 @@ function AIModelSelect() {
     };
   }, []);
 
-  if (models.length === 0) return null;
+  if (!label) return null;
 
   return (
     <div className="flex items-center gap-2 border-t px-3 py-1.5 text-muted-foreground text-xs">
       <span className="shrink-0">Model</span>
-      <select
-        className="h-6 max-w-[220px] cursor-pointer rounded border border-input bg-transparent px-1 text-xs outline-none dark:bg-input/30"
-        value={model}
-        onChange={(e) => {
-          const value = e.target.value;
-          setModel(value);
-
-          if (value) {
-            window.localStorage.setItem(AI_MODEL_STORAGE_KEY, value);
-          } else {
-            window.localStorage.removeItem(AI_MODEL_STORAGE_KEY);
-          }
-        }}
-        aria-label="AI model"
-      >
-        <option value="">Default</option>
-        {models.map((m) => (
-          <option key={m} value={m}>
-            {m}
-          </option>
-        ))}
-      </select>
+      <span className="truncate" title={`${label} — assigned by your administrator`}>
+        {label}
+      </span>
     </div>
   );
 }

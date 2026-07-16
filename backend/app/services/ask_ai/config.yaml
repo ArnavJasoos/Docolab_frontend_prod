@@ -1,4 +1,4 @@
-default_model: groq:llama_70b
+default_model: gemini:gemini_2_5_flash
 
 providers:
   groq:
@@ -15,6 +15,7 @@ models:
 
   groq:
     llama_70b:
+      display_name: Llama 3.3 70B Versatile
       model: groq/llama-3.3-70b-versatile
       context_window: 6000
       max_output_tokens: 6000
@@ -26,7 +27,20 @@ models:
         tpd: 100000
 
   gemini:
+    gemini_2_5_flash:
+      display_name: Gemini 2.5 Flash
+      model: gemini/gemini-2.5-flash
+      context_window: 1048576
+      max_output_tokens: 8192
+      temperature: 0.2
+      rate_limit:
+        rpm: 10
+        rpd: 250
+        tpm: 250000
+        tpd: 1000000
+
     gemini_flash:
+      display_name: Gemini Flash (latest)
       model: gemini/gemini-flash-latest
       context_window: 1048576
       max_output_tokens: 8192
@@ -37,41 +51,9 @@ models:
         tpm: 250000
         tpd: 1000000
 
-    gemini_flash_lite:
-      model: gemini/gemini-flash-lite-latest
-      context_window: 1048576
-      max_output_tokens: 8192
-      temperature: 0.2
-      rate_limit:
-        rpm: 10
-        rpd: 20
-        tpm: 250000
-        tpd: 1000000
-
     gemini_3_flash:
+      display_name: Gemini 3 Flash (preview)
       model: gemini/gemini-3-flash-preview
-      context_window: 1048576
-      max_output_tokens: 8192
-      temperature: 0.2
-      rate_limit:
-        rpm: 5
-        rpd: 20
-        tpm: 250000
-        tpd: 1000000
-
-    gemini_3_1_flash_lite:
-      model: gemini/gemini-3.1-flash-lite
-      context_window: 1048576
-      max_output_tokens: 8192
-      temperature: 0.2
-      rate_limit:
-        rpm: 15
-        rpd: 500
-        tpm: 250000
-        tpd: 1000000
-
-    gemini_3_5_flash:
-      model: gemini/gemini-3.5-flash
       context_window: 1048576
       max_output_tokens: 8192
       temperature: 0.2
@@ -83,6 +65,7 @@ models:
 
   nvidia:
     nvidia_llama:
+      display_name: NVIDIA Llama 3.1 70B Instruct
       model: nvidia_nim/meta/llama-3.1-70b-instruct
       context_window: 131072
       max_output_tokens: 4096

@@ -1,13 +1,13 @@
 import logging
 
-from src.llm.provider import LLMProvider
-from src.llm.context_manager import ContextManager
-from src.llm.prompt import build_messages
-from src.llm.token_manager import TokenManager
-from src.llm.model_registry import ModelRegistry
-from src.llm.session_manager import SessionManager
-from src.llm.rate_limiter import RateLimiter
-from src.llm.exceptions import ContextWindowExceededError
+from app.services.ask_ai.provider import LLMProvider
+from app.services.ask_ai.context_manager import ContextManager
+from app.services.ask_ai.prompt import build_messages
+from app.services.ask_ai.token_manager import TokenManager
+from app.services.ask_ai.model_registry import ModelRegistry
+from app.services.ask_ai.session_manager import SessionManager
+from app.services.ask_ai.rate_limiter import RateLimiter
+from app.services.ask_ai.exceptions import ContextWindowExceededError
 
 logger = logging.getLogger("docolab.pipeline")
 
@@ -70,14 +70,19 @@ class LLMPipeline:
         rate_limit_cfg = ModelRegistry.get_rate_limit_config(model)
         RateLimiter.check_and_consume(model=model, rate_limit_cfg=rate_limit_cfg, tokens=input_tokens)
 
-        response_text = self.provider.generate(model=model, messages=messages)
+        result = self.provider.generate(model=model, messages=messages)
+        response_text = result["text"]
 
         SessionManager.append_turn(session_id=session_id, query=query, response=response_text)
 
+        # Prefer the vendor's reported prompt tokens over our pre-call estimate;
+        # they are what the provider actually billed. Fall back to the estimate
+        # when the vendor omits usage.
         return {
             "response": response_text,
             "model": model,
             "session_id": session_id,
-            "input_tokens": input_tokens,
+            "input_tokens": result["input_tokens"] or input_tokens,
+            "output_tokens": result["output_tokens"],
             "context_compressed": context_compressed,
         }

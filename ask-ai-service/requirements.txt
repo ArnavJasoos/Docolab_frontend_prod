@@ -1,7 +1,0 @@
-litellm
-groq
-python-dotenv
-pyyaml
-fastapi
-uvicorn[standard]
-httpx

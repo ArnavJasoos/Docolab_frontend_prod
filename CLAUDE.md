@@ -1,10 +1,68 @@
 # Docolab — Project Instructions
 
-## NEW (2026-07-16): Ask-AI service replaces the editor's AI backend
+## NEW (2026-07-16, later): Ask-AI merged INTO the backend
 
-The editor's Ask AI feature now runs on a new standalone FastAPI microservice
-**`ask-ai-service/`** (LiteLLM: Groq / Gemini / NVIDIA, configured in its
-`config.yaml`) instead of the Vercel-AI-SDK → ai-gateway → vendor path.
+The standalone `ask-ai-service/` is **deleted**. Its LLM router now lives in the
+backend at **`backend/app/services/ask_ai/`** (same LiteLLM code, same
+`config.yaml`, moved with `git mv` so history follows), exposed as two routes on
+the normal backend API. There is no second service, no second deploy, and no
+`ASK_AI_URL` / `ASK_AI_SERVICE_TOKEN` anywhere. `render.yaml` (which only ever
+deployed the Ask-AI service) is deleted too.
+
+**Why**: the admin's per-user model assignment was dead on the Ask-AI path. Two
+disjoint namespaces existed — the admin catalog held `google:gemini-2.5-flash`,
+`openai:gpt-4o` (models nothing could call) while the router knew
+`groq:llama_70b`, `gemini:gemini_flash`, … and the editor sent whatever the user
+picked in **localStorage**. `users.ai_model` was written by the admin and read by
+nobody. Merging put `current_user` in scope, which makes both model governance
+and usage metering local reads/writes instead of needing grants/service tokens.
+
+- **Endpoints** (both need the user's normal bearer token):
+  `POST /api/ai/ask` `{query, context, session_id, document_id}` and
+  `GET /api/ai/models` (the caller's assigned model + the enabled catalog).
+  There is deliberately **no `model` field on the request** — the backend
+  resolves `users.ai_model` against the org's ENABLED catalog (falling back to
+  the org default), so a client cannot pick an ungoverned model. Errors: 409
+  unknown/disabled model or missing provider key, 422 context window (after one
+  summarize-retry), 429 rate limit, 502 provider failure.
+- **One namespace**: `ai_models.model_key` IS the router's `provider:model_key`
+  id. The catalog is DERIVED from `config.yaml` (`ai_model_service.seed_catalog`)
+  and reconciled into every org on startup, so anything an admin can assign is by
+  construction callable. `config.yaml` decides what EXISTS; `ai_models` decides
+  per-org what is ENABLED + the default. Migration `0012_ask_ai_catalog` deletes
+  the old uncallable rows and clears stale `users.ai_model` values (empty = use
+  the org default). Adding a model to `config.yaml` is an operator action.
+- **Model picker REMOVED** from the editor (`ai-menu.tsx` now shows the assigned
+  model read-only; `docolab.ai-model` localStorage and `AI_MODEL_STORAGE_KEY`
+  are gone). Choosing a model is an admin action: Admin > Users > AI Model.
+- **Telemetry now works**: `ai_usage_events` had a schema + admin aggregations +
+  fully-wired `analytics-cards.tsx`, but NOTHING wrote to it (the writer was the
+  retired ai-gateway). `POST /ai/ask` now writes a row per successful call using
+  the vendor's real `usage` (input+output tokens); attribution comes from the
+  session and the backend's own resolution, never the client. `document_id` is
+  the one client field and is validated against the caller's org. Failed calls
+  are not metered. `LLMProvider.generate` returns `{text, input_tokens,
+  output_tokens}` (was a bare string) and the pipeline prefers vendor counts over
+  its own estimate.
+- **Keys**: `GROQ_API_KEY` / `GEMINI_API_KEY` / `NVIDIA_API_KEY` now live ONLY in
+  `backend/.env` (were `ask-ai-service/.env`). `config.yaml` references them as
+  `${VAR}`. An unset `${VAR}` expands to the literal placeholder (truthy!), which
+  used to get sent upstream as a real key and returned the vendor's opaque "API
+  key not valid" — `ModelRegistry.get_api_key` now detects that and raises
+  `MissingApiKeyError` → 409 to the user, `Set GEMINI_API_KEY in backend/.env` to
+  the server log only.
+- **Deps**: `litellm>=1.40.0,<1.92.0` + `groq` + `pyyaml` added to
+  `backend/requirements.txt`. The 1.92 cap is deliberate: it ships no Python 3.13
+  wheel, so pip builds from source and fails without a Rust toolchain.
+- **Tests**: `backend/test_ask_ai.py` (15 offline unit tests, vendor mocked) and
+  `backend/test_ai_usage_metering.py` (5 live-DB integration tests: real routes +
+  DB + admin aggregations, vendor mocked). Both pass. The old suite's HTTP tests
+  (`/health`, the service-token gate) went with the deleted service.
+
+### Superseded: the standalone Ask-AI service (2026-07-16, earlier)
+
+Kept for context — **all of the below is obsolete**; the service described here
+no longer exists.
 
 - **Endpoints**: `GET /health` (default + available models) and `POST /ask`
   `{query, context, model, session_id}` — query = what the user typed or the
@@ -135,9 +193,8 @@ confirmed repeatedly throughout both sessions.
 | Service | Dir | Runtime |
 |---------|-----|---------|
 | Frontend | `frontend/` | Next.js 16 / React 19 / TypeScript |
-| Backend | `backend/` | FastAPI / SQLAlchemy async / PostgreSQL |
+| Backend | `backend/` | FastAPI / SQLAlchemy async / PostgreSQL (incl. the Ask-AI LLM router, `app/services/ask_ai/`) |
 | Collab WS | `hocuspocus-server/` | Node.js / Hocuspocus / Y.js |
-| Ask-AI | `ask-ai-service/` | FastAPI / LiteLLM (Groq, Gemini, NVIDIA) |
 
 ## Tech Stack
 
@@ -147,7 +204,7 @@ confirmed repeatedly throughout both sessions.
 | Framework | Next.js 16.2.9 (App Router) | React 19 |
 | Editor | Plate.js v53 | `@platejs/*` packages |
 | Styling | Tailwind CSS v4 + shadcn/ui | `components.json` driven |
-| AI | `ask-ai-service/` (FastAPI + LiteLLM) | called by `src/app/api/ai/command/route.ts` |
+| AI | `backend/app/services/ask_ai/` (LiteLLM) | `POST /api/ai/ask`; called by `src/app/api/ai/command/route.ts` |
 | State | React context (`lib/store/document-store.tsx`) | no redux/zustand |
 | Language (BE) | Python 3.11+ | |
 | Framework (BE) | FastAPI + Pydantic v2 | async throughout |
@@ -171,8 +228,7 @@ cd backend && python run.py         # http://localhost:8000
 # Collaboration server
 cd hocuspocus-server && npm run dev # WebSocket default port
 
-# Ask-AI service (editor AI backend)
-cd ask-ai-service && python run.py  # http://localhost:8001 (GET /health)
+# (Ask-AI has no server of its own — it runs inside the backend above.)
 ```
 
 ## Environment Variables
@@ -180,16 +236,8 @@ cd ask-ai-service && python run.py  # http://localhost:8001 (GET /health)
 **frontend/.env.local**
 ```
 NEXT_PUBLIC_API_URL=http://localhost:8000/api  # defaults to this if unset
-ASK_AI_URL=http://localhost:8001               # Ask-AI service (server-side only)
 ```
-
-**ask-ai-service/.env** (copy from `.env.example`)
-```
-GROQ_API_KEY=...     # provider keys live ONLY here
-GEMINI_API_KEY=...
-NVIDIA_API_KEY=...
-PORT=8001
-```
+(No AI vars: the AI routes proxy to NEXT_PUBLIC_API_URL like everything else.)
 
 **backend/.env** (copy from `.env.example`)
 ```
@@ -197,6 +245,9 @@ DATABASE_URL=postgresql+asyncpg://...
 SECRET_KEY=<long random string>   # must match hocuspocus-server JWT_SECRET
 ACCESS_TOKEN_EXPIRE_MINUTES=60
 REFRESH_TOKEN_EXPIRE_DAYS=30
+GROQ_API_KEY=...     # AI provider keys live ONLY here. Without a key the
+GEMINI_API_KEY=...   # matching provider's models return 409 ("not configured
+NVIDIA_API_KEY=...   # on this server") — never a vendor auth error.
 ```
 
 **hocuspocus-server/.env** (copy from `.env.example`)
@@ -299,8 +350,9 @@ docs: <docs/comments only>
 | Change DB schema | `backend/app/models/database_models.py` + new Alembic migration |
 | Add editor plugin | `frontend/src/components/editor/plugins/` |
 | Add a page | `frontend/src/app/<route>/page.tsx` |
-| Change AI prompts | `frontend/src/app/api/ai/command/prompt/` (editor-side) + `ask-ai-service/src/llm/prompt_templates.py` (service-side) |
-| Change AI models / rate limits | `ask-ai-service/config.yaml` |
+| Change AI prompts | `frontend/src/app/api/ai/command/prompt/` (editor-side) + `backend/app/services/ask_ai/prompt_templates.py` (router-side) |
+| Change AI models / rate limits | `backend/app/services/ask_ai/config.yaml` (then restart: startup reconciles the admin catalog) |
+| Change a user's AI model | Admin > Users > AI Model (`users.ai_model`); never the client |
 | Change RBAC permissions | `backend/app/main.py::ROLE_PERMISSIONS` |
 | Add collab feature | `hocuspocus-server/server.js` |
 
@@ -520,15 +572,13 @@ deploy. Backend list items now include `updated_at` (browser sort/labels work).
 
 **Deploy checklist (Vercel + backend/collab hosts)**
 - Vercel env: `NEXT_PUBLIC_API_URL=https://<backend>/api`,
-  `NEXT_PUBLIC_COLLAB_URL=wss://<hocuspocus>` (MUST be wss:// on https pages),
-  `ASK_AI_URL=https://<ask-ai-service-on-render>` (+ optional
-  `ASK_AI_SERVICE_TOKEN`, must equal the service's). The old
-  `GOOGLE_GENERATIVE_AI_API_KEY` is no longer used by the Ask-AI path.
-- ask-ai-service: deploy via repo-root `render.yaml` (or manually: rootDir
-  `ask-ai-service`, build `pip install -r requirements.txt`, start
-  `python run.py`, health `/health`) with real `GROQ_API_KEY` /
-  `GEMINI_API_KEY` / `NVIDIA_API_KEY`.
-- Backend: deploy with `AUTO_MIGRATE=1` (applies `0006_version_content`) or run
+  `NEXT_PUBLIC_COLLAB_URL=wss://<hocuspocus>` (MUST be wss:// on https pages).
+  No AI vars — AI now goes to NEXT_PUBLIC_API_URL like every other call. The old
+  `GOOGLE_GENERATIVE_AI_API_KEY` is unused by the Ask-AI path (the unmounted
+  copilot route still reads it).
+- Ask-AI: nothing to deploy — it is part of the backend. Set `GROQ_API_KEY` /
+  `GEMINI_API_KEY` / `NVIDIA_API_KEY` on the BACKEND host.
+- Backend: deploy with `AUTO_MIGRATE=1` (applies `0012_ask_ai_catalog`) or run
   `alembic upgrade head` manually. CORS_ORIGINS must include the Vercel domain.
 - hocuspocus-server: mandatory infra; needs `JWT_SECRET` (= backend
   SECRET_KEY) + `DATABASE_URL`; port open for WSS.
