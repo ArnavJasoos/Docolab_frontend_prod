@@ -66,6 +66,7 @@ import {
 } from '@/components/ui/popover';
 import { cn } from '@/lib/utils';
 import { commentPlugin } from '@/components/editor/plugins/comment-kit';
+import { AI_MODEL_STORAGE_KEY } from '@/components/editor/use-chat';
 
 import { AIChatEditor } from './ai-chat-editor';
 
@@ -146,9 +147,6 @@ export function AIMenu() {
 
   useHotkeys('esc', () => {
     api.aiChat.stop();
-
-    // remove when you implement the route /api/ai/command
-    (chat as any)._abortFakeStream();
   });
 
   const isLoading = status === 'streaming' || status === 'submitted';
@@ -250,9 +248,83 @@ export function AIMenu() {
               />
             </CommandList>
           )}
+
+          {!isLoading && <AIModelSelect />}
         </Command>
       </PopoverContent>
     </Popover>
+  );
+}
+
+/** Model catalog from /api/ai/models, cached for the page's lifetime. */
+let cachedModels: string[] | null = null;
+
+/**
+ * Compact model picker shown at the bottom of the Ask-AI popup. The choice is
+ * kept in localStorage and sent as `model` on every /ask call ("Default" =
+ * let the service use its config default).
+ */
+function AIModelSelect() {
+  const [models, setModels] = React.useState<string[]>(cachedModels ?? []);
+  const [model, setModel] = React.useState(() =>
+    typeof window === 'undefined'
+      ? ''
+      : (window.localStorage.getItem(AI_MODEL_STORAGE_KEY) ?? '')
+  );
+
+  React.useEffect(() => {
+    if (cachedModels) return;
+
+    let cancelled = false;
+
+    void (async () => {
+      try {
+        const res = await fetch('/api/ai/models');
+
+        if (!res.ok) return;
+
+        const data = await res.json();
+        cachedModels = data.available_models ?? [];
+
+        if (!cancelled) setModels(cachedModels!);
+      } catch {
+        // service down — picker simply doesn't render
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  if (models.length === 0) return null;
+
+  return (
+    <div className="flex items-center gap-2 border-t px-3 py-1.5 text-muted-foreground text-xs">
+      <span className="shrink-0">Model</span>
+      <select
+        className="h-6 max-w-[220px] cursor-pointer rounded border border-input bg-transparent px-1 text-xs outline-none dark:bg-input/30"
+        value={model}
+        onChange={(e) => {
+          const value = e.target.value;
+          setModel(value);
+
+          if (value) {
+            window.localStorage.setItem(AI_MODEL_STORAGE_KEY, value);
+          } else {
+            window.localStorage.removeItem(AI_MODEL_STORAGE_KEY);
+          }
+        }}
+        aria-label="AI model"
+      >
+        <option value="">Default</option>
+        {models.map((m) => (
+          <option key={m} value={m}>
+            {m}
+          </option>
+        ))}
+      </select>
+    </div>
   );
 }
 
@@ -692,9 +764,6 @@ export function AILoadingBar() {
 
   useHotkeys('esc', () => {
     api.aiChat.stop();
-
-    // remove when you implement the route /api/ai/command
-    (chat as any)._abortFakeStream();
   });
 
   if (

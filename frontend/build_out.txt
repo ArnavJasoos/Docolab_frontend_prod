@@ -1,0 +1,32 @@
+▲ Next.js 16.2.9 (Turbopack)
+- Environments: .env.local
+
+  Creating an optimized production build ...
+(node:9208) [MODULE_TYPELESS_PACKAGE_JSON] Warning: Module type of file:///C:/Users/achintya.v/Documents/Docolab/Docolab/frontend/tailwind.config.ts?id=1783421523263 is not specified and it doesn't parse as CommonJS.
+Reparsing as ES module because module syntax was detected. This incurs a performance overhead.
+To eliminate this warning, add "type": "module" to \\?\C:\Users\achintya.v\Documents\Docolab\Docolab\frontend\package.json.
+(Use `node --trace-warnings ...` to show where the warning was created)
+✓ Compiled successfully in 67s
+  Running TypeScript ...
+  Finished TypeScript in 60s ...
+  Collecting page data using 7 workers ...
+  Generating static pages using 7 workers (0/9) ...
+  Generating static pages using 7 workers (2/9) 
+  Generating static pages using 7 workers (4/9) 
+  Generating static pages using 7 workers (6/9) 
+✓ Generating static pages using 7 workers (9/9) in 1218ms
+  Finalizing page optimization ...
+
+Route (app)
+┌ ○ /
+├ ○ /_not-found
+├ ƒ /api/ai/command
+├ ƒ /api/ai/copilot
+├ ○ /browser
+├ ƒ /editor
+└ ○ /login
+
+
+○  (Static)   prerendered as static content
+ƒ  (Dynamic)  server-rendered on demand
+

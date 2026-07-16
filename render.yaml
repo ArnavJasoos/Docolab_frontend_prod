@@ -1,0 +1,28 @@
+# Render Blueprint for the Ask-AI service ONLY. The main backend was created
+# manually in the Render dashboard and is intentionally not managed here.
+# Use: Render dashboard -> New -> Blueprint -> select this repo. Or ignore
+# this file and create the service manually with the same settings.
+services:
+  - type: web
+    name: docolab-ask-ai
+    runtime: python
+    rootDir: ask-ai-service
+    buildCommand: pip install -r requirements.txt
+    startCommand: python run.py
+    healthCheckPath: /health
+    envVars:
+      - key: PYTHON_VERSION
+        value: 3.11.9
+      # Real provider keys — enter these in the Render dashboard (sync: false
+      # means the blueprint never stores their values).
+      - key: GROQ_API_KEY
+        sync: false
+      - key: GEMINI_API_KEY
+        sync: false
+      - key: NVIDIA_API_KEY
+        sync: false
+      # Optional shared secret. If set, POST /ask requires
+      # "Authorization: Bearer <token>" — set the SAME value as
+      # ASK_AI_SERVICE_TOKEN on Vercel. Leave unset to keep /ask open.
+      - key: ASK_AI_SERVICE_TOKEN
+        sync: false

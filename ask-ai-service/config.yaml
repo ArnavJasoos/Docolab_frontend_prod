@@ -1,0 +1,94 @@
+default_model: groq:llama_70b
+
+providers:
+  groq:
+    api_key: ${GROQ_API_KEY}
+
+  gemini:
+    api_key: ${GEMINI_API_KEY}
+
+
+  nvidia:
+    api_key: ${NVIDIA_API_KEY}
+
+models:
+
+  groq:
+    llama_70b:
+      model: groq/llama-3.3-70b-versatile
+      context_window: 6000
+      max_output_tokens: 6000
+      temperature: 0.2
+      rate_limit:
+        rpm: 30
+        rpd: 1000
+        tpm: 12000
+        tpd: 100000
+
+  gemini:
+    gemini_flash:
+      model: gemini/gemini-flash-latest
+      context_window: 1048576
+      max_output_tokens: 8192
+      temperature: 0.2
+      rate_limit:
+        rpm: 5
+        rpd: 20
+        tpm: 250000
+        tpd: 1000000
+
+    gemini_flash_lite:
+      model: gemini/gemini-flash-lite-latest
+      context_window: 1048576
+      max_output_tokens: 8192
+      temperature: 0.2
+      rate_limit:
+        rpm: 10
+        rpd: 20
+        tpm: 250000
+        tpd: 1000000
+
+    gemini_3_flash:
+      model: gemini/gemini-3-flash-preview
+      context_window: 1048576
+      max_output_tokens: 8192
+      temperature: 0.2
+      rate_limit:
+        rpm: 5
+        rpd: 20
+        tpm: 250000
+        tpd: 1000000
+
+    gemini_3_1_flash_lite:
+      model: gemini/gemini-3.1-flash-lite
+      context_window: 1048576
+      max_output_tokens: 8192
+      temperature: 0.2
+      rate_limit:
+        rpm: 15
+        rpd: 500
+        tpm: 250000
+        tpd: 1000000
+
+    gemini_3_5_flash:
+      model: gemini/gemini-3.5-flash
+      context_window: 1048576
+      max_output_tokens: 8192
+      temperature: 0.2
+      rate_limit:
+        rpm: 5
+        rpd: 20
+        tpm: 250000
+        tpd: 1000000
+
+  nvidia:
+    nvidia_llama:
+      model: nvidia_nim/meta/llama-3.1-70b-instruct
+      context_window: 131072
+      max_output_tokens: 4096
+      temperature: 0.2
+      rate_limit:
+        # NVIDIA's free build.nvidia.com/NIM tier only publishes a flat
+        # 40 RPM cap per API key - no documented RPD/TPM/TPD, so those
+        # are left high/unset rather than guessed.
+        rpm: 40

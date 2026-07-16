@@ -1,57 +1,182 @@
-import type {
-  ChatMessage,
-  ToolName,
-} from '@/components/editor/use-chat';
+// =============================================================================
+// app/api/ai/command/route.ts
+//
+// Ask-AI command route. The Plate editor (AIChatPlugin / use-chat) posts here;
+// this route translates the editor request into the standalone Ask-AI
+// service's `POST /ask` contract and converts the JSON answer back into the
+// UI-message stream the editor already consumes — so the existing streaming
+// insert, suggestion diffing, and Accept / Reject flows keep working
+// unchanged on top of the new backend.
+//
+//   POST {ASK_AI_URL}/ask
+//   { "query": ..., "context": ..., "model": ..., "session_id": ... }
+//
+// - query      → what the user typed, or the instruction behind the Ask-AI
+//                action the user clicked (fix grammar, make longer, ...).
+// - context    → the section of the document the user selected.
+// - model      → the user's model pick ('provider:model_key'); empty = the
+//                service's default_model.
+// - session_id → unique per user (multi-turn memory lives in the service).
+//
+// Vendor keys live ONLY in ask-ai-service/.env — nothing AI-secret is here.
+// =============================================================================
+
 import type { NextRequest } from 'next/server';
 
-import { createGoogleGenerativeAI } from '@ai-sdk/google';
-import {
-  type LanguageModel,
-  type UIMessageStreamWriter,
-  createUIMessageStream,
-  createUIMessageStreamResponse,
-  generateText,
-  Output,
-  streamText,
-  tool,
-} from 'ai';
+import { createUIMessageStream, createUIMessageStreamResponse } from 'ai';
 import { NextResponse } from 'next/server';
-import { type SlateEditor, createSlateEditor, nanoid } from 'platejs';
-import { z } from 'zod';
+import { createSlateEditor, nanoid } from 'platejs';
+
+import type { ChatMessage, ToolName } from '@/components/editor/use-chat';
 
 import { BaseEditorKit } from '@/components/editor/editor-base-kit';
-import { markdownJoinerTransform } from '@/lib/markdown-joiner-transform';
-
-import { getGatewayProvider } from '../gateway';
 
 import {
   buildEditTableMultiCellPrompt,
-  getChooseToolPrompt,
   getCommentPrompt,
   getEditPrompt,
   getGeneratePrompt,
 } from './prompt';
+import {
+  addSelection,
+  getLastUserInstruction,
+  getMarkdownWithSelection,
+  isMultiBlocks,
+} from './utils';
 
-/** Map any legacy/provider-prefixed model id onto a Gemini model name. */
-function toGeminiModel(id?: string): string {
-  const fallback = 'gemini-2.5-flash';
-  if (!id) return fallback;
-  if (id.startsWith('google/')) return id.slice('google/'.length);
-  if (id.startsWith('gemini')) return id;
-  return fallback;
+// LLM calls routinely exceed serverless defaults; give the hosted (Vercel)
+// function up to 60s before the platform kills the request. No effect in dev.
+export const maxDuration = 60;
+
+const ASK_AI_URL = (process.env.ASK_AI_URL || 'http://localhost:8001').replace(
+  /\/+$/,
+  ''
+);
+// Optional shared secret matching the service's ASK_AI_SERVICE_TOKEN. When
+// both sides set it, /ask calls carry it as a Bearer token; when unset the
+// request is sent exactly as before.
+const ASK_AI_SERVICE_TOKEN = process.env.ASK_AI_SERVICE_TOKEN;
+
+/** Directive appended to prompts whose answer must be machine-parseable. */
+const JSON_ONLY_RULE =
+  'CRITICAL: Respond with ONLY the raw JSON array. No prose, no explanations, no markdown code fences.';
+
+interface AskResponse {
+  context_compressed: boolean;
+  input_tokens: number;
+  model: string;
+  response: string;
+  session_id?: string | null;
+}
+
+class AskAIError extends Error {
+  constructor(
+    public status: number,
+    message: string
+  ) {
+    super(message);
+  }
+}
+
+/** Turn the service's error `detail` payload into a user-readable message. */
+function detailToMessage(status: number, detail: unknown): string {
+  if (typeof detail === 'string') return detail;
+
+  if (detail && typeof detail === 'object') {
+    const d = detail as Record<string, unknown>;
+
+    if (status === 429) {
+      const retry = Math.ceil(Number(d.retry_after_seconds ?? 0));
+      return `AI rate limit reached (${d.scope ?? 'quota'}) for ${d.model ?? 'this model'}. Try again in ~${retry || 60}s or switch model.`;
+    }
+    if (status === 422 && d.error === 'context_window_exceeded') {
+      return `Selection is too large for ${d.model ?? 'the model'} (${d.input_tokens} tokens, limit ${d.limit_tokens}). Select a smaller section or switch model.`;
+    }
+    if (typeof d.message === 'string') return d.message;
+  }
+
+  return 'AI request failed.';
+}
+
+async function askAI(
+  payload: {
+    context: string;
+    model?: string;
+    query: string;
+    session_id?: string;
+  },
+  signal: AbortSignal
+): Promise<AskResponse> {
+  let res: Response;
+
+  try {
+    res = await fetch(`${ASK_AI_URL}/ask`, {
+      body: JSON.stringify(payload),
+      headers: {
+        'Content-Type': 'application/json',
+        ...(ASK_AI_SERVICE_TOKEN
+          ? { Authorization: `Bearer ${ASK_AI_SERVICE_TOKEN}` }
+          : {}),
+      },
+      method: 'POST',
+      signal,
+    });
+  } catch (error) {
+    if (error instanceof Error && error.name === 'AbortError') throw error;
+
+    throw new AskAIError(
+      502,
+      `Ask-AI service is unreachable at ${ASK_AI_URL}. Is ask-ai-service running?`
+    );
+  }
+
+  if (!res.ok) {
+    let detail: unknown = null;
+
+    try {
+      detail = (await res.json())?.detail;
+    } catch {
+      // non-JSON error body — fall through to the generic message
+    }
+
+    throw new AskAIError(res.status, detailToMessage(res.status, detail));
+  }
+
+  return (await res.json()) as AskResponse;
+}
+
+/** Extract the first JSON array found in a (possibly fenced) LLM response. */
+function parseJsonArray(text: string): Record<string, unknown>[] | null {
+  const start = text.indexOf('[');
+  const end = text.lastIndexOf(']');
+
+  if (start === -1 || end <= start) return null;
+
+  try {
+    const value = JSON.parse(text.slice(start, end + 1));
+
+    return Array.isArray(value) ? value : null;
+  } catch {
+    return null;
+  }
+}
+
+/** Slice the answer into small deltas so the editor renders progressively. */
+function* chunkText(text: string, size = 48): Generator<string> {
+  for (let i = 0; i < text.length; i += size) {
+    yield text.slice(i, i + size);
+  }
 }
 
 export async function POST(req: NextRequest) {
-  const {
-    apiKey: key,
-    ctx,
-    documentId,
-    messages: messagesRaw,
-    model,
-    token,
-  } = await req.json();
+  const { ctx, messages: messagesRaw, model, sessionId } = await req.json();
 
-  const { children, selection, toolName: toolNameParam } = ctx;
+  const {
+    children,
+    selection,
+    toolName: toolNameParam,
+  } = ctx ?? ({} as never);
+  const messages: ChatMessage[] = messagesRaw ?? [];
 
   const editor = createSlateEditor({
     plugins: BaseEditorKit,
@@ -59,282 +184,167 @@ export async function POST(req: NextRequest) {
     value: children,
   });
 
-  // PREFERRED PATH: route every model call through the backend-governed AI
-  // gateway. The model is chosen by the backend (documents.ai_model), so the
-  // per-step model ids the call sites pass are ignored here. No vendor key on
-  // this server — the gateway holds it.
-  const gateway = await getGatewayProvider({
-    documentId,
-    token,
-    signal: req.signal,
-  });
-
-  // FALLBACK (local dev before the gateway is deployed): use the server's own
-  // Gemini key, mapping any legacy/provider-prefixed id onto a Gemini model.
-  const apiKey = key || process.env.GOOGLE_GENERATIVE_AI_API_KEY;
-  if (!gateway && !apiKey) {
-    return NextResponse.json(
-      { error: 'AI not configured: no gateway grant and no GOOGLE_GENERATIVE_AI_API_KEY.' },
-      { status: 401 }
-    );
-  }
-
   const isSelecting = editor.api.isExpanded();
+  const instruction = getLastUserInstruction(messages);
 
-  const google = gateway ? null : createGoogleGenerativeAI({ apiKey: apiKey! });
-  const gatewayProvider = (id?: string): LanguageModel =>
-    gateway ? gateway.model(id) : google!(toGeminiModel(id));
+  // Presets pass their tool explicitly; free-typed input defaults to
+  // 'generate' (edit requires a selection, so guard against a stale value).
+  let toolName: ToolName = (toolNameParam as ToolName) || 'generate';
 
-  try {
-    const stream = createUIMessageStream<ChatMessage>({
-      execute: async ({ writer }) => {
-        let toolName = toolNameParam;
+  if (toolName === 'edit' && !isSelecting) toolName = 'generate';
 
-        if (!toolName) {
-          const prompt = getChooseToolPrompt({
-            isSelecting,
-            messages: messagesRaw,
-          });
+  // Map the editor request onto the Ask-AI contract.
+  let query = '';
+  let context = '';
+  // How the service answer is relayed to the editor: plain text (insert /
+  // suggestion diff) or structured data events (comments, table cells).
+  let responseMode: 'comment' | 'table' | 'text' = 'text';
+  // Multi-turn memory only helps conversational Q&A; edit/comment actions are
+  // stateless transformations, and skipping the session keeps their large
+  // structured prompts from crowding the model's context window over time.
+  let useSession = false;
 
-          const enumOptions = isSelecting
-            ? ['generate', 'edit', 'comment']
-            : ['generate', 'comment'];
-          const modelId = model || 'google/gemini-2.5-flash';
-
-          const { output: AIToolName } = await generateText({
-            model: gatewayProvider(modelId),
-            output: Output.choice({ options: enumOptions }),
-            prompt,
-          });
-
-          writer.write({
-            data: AIToolName as ToolName,
-            type: 'data-toolName',
-          });
-
-          toolName = AIToolName;
-        }
-
-        const stream = streamText({
-          experimental_transform: markdownJoinerTransform(),
-          model: gatewayProvider(model || 'openai/gpt-4o-mini'),
-          // Not used
-          prompt: '',
-          tools: {
-            comment: getCommentTool(editor, {
-              messagesRaw,
-              model: gatewayProvider(model || 'google/gemini-2.5-flash'),
-              writer,
-            }),
-            table: getTableTool(editor, {
-              messagesRaw,
-              model: gatewayProvider(model || 'google/gemini-2.5-flash'),
-              writer,
-            }),
-          },
-          prepareStep: async (step) => {
-            if (toolName === 'comment') {
-              return {
-                ...step,
-                toolChoice: { toolName: 'comment', type: 'tool' },
-              };
-            }
-
-            if (toolName === 'edit') {
-              const [editPrompt, editType] = getEditPrompt(editor, {
-                isSelecting,
-                messages: messagesRaw,
-              });
-
-              // Table editing uses the table tool
-              if (editType === 'table') {
-                return {
-                  ...step,
-                  toolChoice: { toolName: 'table', type: 'tool' },
-                };
-              }
-
-              return {
-                ...step,
-                activeTools: [],
-                model:
-                  editType === 'selection'
-                    ? //The selection task is more challenging, so we chose to use Gemini 2.5 Flash.
-                      gatewayProvider(model || 'google/gemini-2.5-flash')
-                    : gatewayProvider(model || 'openai/gpt-4o-mini'),
-                messages: [
-                  {
-                    content: editPrompt,
-                    role: 'user',
-                  },
-                ],
-              };
-            }
-
-            if (toolName === 'generate') {
-              const generatePrompt = getGeneratePrompt(editor, {
-                isSelecting,
-                messages: messagesRaw,
-              });
-
-              return {
-                ...step,
-                activeTools: [],
-                messages: [
-                  {
-                    content: generatePrompt,
-                    role: 'user',
-                  },
-                ],
-                model: gatewayProvider(model || 'openai/gpt-4o-mini'),
-              };
-            }
-          },
-        });
-
-        writer.merge(stream.toUIMessageStream({ sendFinish: false }));
-      },
+  if (toolName === 'comment') {
+    responseMode = 'comment';
+    query = `${getCommentPrompt(editor, { messages })}\n\n${JSON_ONLY_RULE}`;
+  } else if (toolName === 'edit') {
+    const [editPrompt, editType] = getEditPrompt(editor, {
+      isSelecting,
+      messages,
     });
 
-    return createUIMessageStreamResponse({ stream });
-  } catch {
+    if (editType === 'table') {
+      responseMode = 'table';
+      query = `${buildEditTableMultiCellPrompt(editor, messages)}\n\n${JSON_ONLY_RULE}`;
+    } else {
+      query = editPrompt;
+    }
+  } else if (isSelecting) {
+    // Grounded Q&A / generation over the user's selection — the selection is
+    // the /ask `context`, the user's ask is the `query` (the spec's example).
+    useSession = true;
+
+    if (!isMultiBlocks(editor)) addSelection(editor);
+
+    context = getMarkdownWithSelection(editor);
+    query = context.includes('<Selection>')
+      ? `${instruction}\n\n(In the context, the text between <Selection> and </Selection> is the part the user highlighted. These are input-only markers — never include them in your output.)`
+      : instruction;
+  } else {
+    // Freeform generation at the cursor ("what is hadoop", continue writing,
+    // summarize-with-{editor}-embedded, ...).
+    useSession = true;
+    query = getGeneratePrompt(editor, { isSelecting: false, messages });
+  }
+
+  if (!query.trim()) {
+    return NextResponse.json({ error: 'Empty AI request.' }, { status: 400 });
+  }
+
+  let ask: AskResponse;
+
+  try {
+    ask = await askAI(
+      {
+        context,
+        model: model || undefined,
+        query,
+        session_id: useSession && sessionId ? String(sessionId) : undefined,
+      },
+      req.signal
+    );
+  } catch (error) {
+    if (error instanceof AskAIError) {
+      return NextResponse.json({ error: error.message }, { status: error.status });
+    }
+    if (error instanceof Error && error.name === 'AbortError') {
+      return NextResponse.json(null, { status: 408 });
+    }
+
+    console.error('[ai/command] unexpected error:', error);
+
     return NextResponse.json(
       { error: 'Failed to process AI request' },
       { status: 500 }
     );
   }
-}
 
-const getCommentTool = (
-  editor: SlateEditor,
-  {
-    messagesRaw,
-    model,
-    writer,
-  }: {
-    messagesRaw: ChatMessage[];
-    model: LanguageModel;
-    writer: UIMessageStreamWriter<ChatMessage>;
-  }
-) =>
-  tool({
-    description: 'Comment on the content',
-    inputSchema: z.object({}),
-    strict: true,
-    execute: async () => {
-      const commentSchema = z.object({
-        blockId: z
-          .string()
-          .describe(
-            'The id of the starting block. If the comment spans multiple blocks, use the id of the first block.'
-          ),
-        comment: z
-          .string()
-          .describe('A brief comment or explanation for this fragment.'),
-        content: z
-          .string()
-          .describe(
-            String.raw`The original document fragment to be commented on.It can be the entire block, a small part within a block, or span multiple blocks. If spanning multiple blocks, separate them with two \n\n.`
-          ),
-      });
+  const stream = createUIMessageStream<ChatMessage>({
+    execute: async ({ writer }) => {
+      // The plugin already knows the tool for preset actions; only free-typed
+      // input needs to be told which tool was chosen (mirrors the old route).
+      if (!toolNameParam) {
+        writer.write({ data: toolName, type: 'data-toolName' });
+      }
 
-      const { partialOutputStream } = streamText({
-        model,
-        output: Output.array({ element: commentSchema }),
-        prompt: getCommentPrompt(editor, {
-          messages: messagesRaw,
-        }),
-      });
+      if (responseMode === 'comment') {
+        const items = parseJsonArray(ask.response) ?? [];
 
-      let lastLength = 0;
-
-      for await (const partialArray of partialOutputStream) {
-        for (let i = lastLength; i < partialArray.length; i++) {
-          const comment = partialArray[i];
-          const commentDataId = nanoid();
+        for (const item of items) {
+          if (!item?.blockId || !item?.content) continue;
 
           writer.write({
-            id: commentDataId,
+            id: nanoid(),
             data: {
-              comment,
+              comment: {
+                blockId: String(item.blockId),
+                comment: String(item.comments ?? item.comment ?? ''),
+                content: String(item.content),
+              },
               status: 'streaming',
             },
             type: 'data-comment',
           });
         }
 
-        lastLength = partialArray.length;
+        writer.write({
+          id: nanoid(),
+          data: { comment: null, status: 'finished' },
+          type: 'data-comment',
+        });
+
+        return;
       }
 
-      writer.write({
-        id: nanoid(),
-        data: {
-          comment: null,
-          status: 'finished',
-        },
-        type: 'data-comment',
-      });
-    },
-  });
+      if (responseMode === 'table') {
+        const items = parseJsonArray(ask.response) ?? [];
 
-const getTableTool = (
-  editor: SlateEditor,
-  {
-    messagesRaw,
-    model,
-    writer,
-  }: {
-    messagesRaw: ChatMessage[];
-    model: LanguageModel;
-    writer: UIMessageStreamWriter<ChatMessage>;
-  }
-) =>
-  tool({
-    description: 'Edit table cells',
-    inputSchema: z.object({}),
-    strict: true,
-    execute: async () => {
-      const cellUpdateSchema = z.object({
-        content: z
-          .string()
-          .describe(
-            String.raw`The new content for the cell. Can contain multiple paragraphs separated by \n\n.`
-          ),
-        id: z.string().describe('The id of the table cell to update.'),
-      });
-
-      const { partialOutputStream } = streamText({
-        model,
-        output: Output.array({ element: cellUpdateSchema }),
-        prompt: buildEditTableMultiCellPrompt(editor, messagesRaw),
-      });
-
-      let lastLength = 0;
-
-      for await (const partialArray of partialOutputStream) {
-        for (let i = lastLength; i < partialArray.length; i++) {
-          const cellUpdate = partialArray[i];
+        for (const item of items) {
+          if (!item?.id || item?.content === undefined) continue;
 
           writer.write({
             id: nanoid(),
             data: {
-              cellUpdate,
+              cellUpdate: {
+                content: String(item.content),
+                id: String(item.id),
+              },
               status: 'streaming',
             },
             type: 'data-table',
           });
         }
 
-        lastLength = partialArray.length;
+        writer.write({
+          id: nanoid(),
+          data: { cellUpdate: null, status: 'finished' },
+          type: 'data-table',
+        });
+
+        return;
       }
 
-      writer.write({
-        id: nanoid(),
-        data: {
-          cellUpdate: null,
-          status: 'finished',
-        },
-        type: 'data-table',
-      });
+      const id = nanoid();
+
+      writer.write({ id, type: 'text-start' });
+
+      for (const delta of chunkText(ask.response)) {
+        writer.write({ delta, id, type: 'text-delta' });
+      }
+
+      writer.write({ id, type: 'text-end' });
     },
   });
+
+  return createUIMessageStreamResponse({ stream });
+}

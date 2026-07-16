@@ -1,5 +1,44 @@
 # Docolab — Project Instructions
 
+## NEW (2026-07-16): Ask-AI service replaces the editor's AI backend
+
+The editor's Ask AI feature now runs on a new standalone FastAPI microservice
+**`ask-ai-service/`** (LiteLLM: Groq / Gemini / NVIDIA, configured in its
+`config.yaml`) instead of the Vercel-AI-SDK → ai-gateway → vendor path.
+
+- **Endpoints**: `GET /health` (default + available models) and `POST /ask`
+  `{query, context, model, session_id}` — query = what the user typed or the
+  clicked Ask-AI action (fix grammar, make longer, ...), context = the
+  selected document section, model = `provider:model_key` (empty → default),
+  session_id = per-user multi-turn memory (in-memory, 1h TTL). Errors: 400
+  unknown model, 422 context window (after one summarize-retry), 429 rate
+  limit, 502 provider failure.
+- **Frontend**: `app/api/ai/command/route.ts` rewritten — translates the Plate
+  editor request into `/ask` and converts the JSON answer back into the AI-SDK
+  UI-message stream, so streaming insert, suggestion diffs, and the existing
+  **Accept / Reject** menu work unchanged. `use-chat.ts` fake-stream mock
+  removed (errors now surface as toasts); sends `sessionId` (user id) +
+  `model`. New `app/api/ai/models/route.ts` proxies `/health`; `ai-menu.tsx`
+  gained a model picker (persisted in localStorage `docolab.ai-model`).
+- **Env**: `frontend/.env.local` → `ASK_AI_URL=http://localhost:8001`
+  (server-side only). Provider keys live ONLY in `ask-ai-service/.env`
+  (`GROQ_API_KEY`, `GEMINI_API_KEY`, `NVIDIA_API_KEY`).
+- **Unchanged**: `ai-gateway/`, backend `api/ai.py` grant/usage endpoints, the
+  admin model catalog, and the (unmounted) copilot route still exist and
+  function — they are just no longer on the editor's Ask-AI path.
+- **Tests**: `ask-ai-service/test_ask_ai_service.py` (offline, provider
+  mocked, 14 tests). Route integration verified against a stub + the live
+  service; `tsc` + `eslint` clean on all touched frontend files.
+- **Hosted deploy (Render + Vercel)**: repo-root `render.yaml` deploys the
+  service to Render (`rootDir: ask-ai-service`, start `python run.py`, health
+  `/health`; `run.py` binds `0.0.0.0:$PORT` and is cwd-independent). Vercel
+  needs env vars `ASK_AI_URL=https://<render-service>.onrender.com` and
+  (recommended) `ASK_AI_SERVICE_TOKEN` matching the same var on Render —
+  when set on both sides `POST /ask` requires `Authorization: Bearer <token>`
+  (unset = open, exact local-dev behavior; `/health` always open). The
+  command route sets `maxDuration = 60` so LLM calls survive Vercel's
+  serverless timeout. Full steps: `ask-ai-service/README.md` → Deploy.
+
 ## RESOLVED (2026-07-03): follow-up fixes + new features
 
 Second pass after the 2026-07-02 production fixes. All backend-verifiable via
@@ -98,6 +137,7 @@ confirmed repeatedly throughout both sessions.
 | Frontend | `frontend/` | Next.js 16 / React 19 / TypeScript |
 | Backend | `backend/` | FastAPI / SQLAlchemy async / PostgreSQL |
 | Collab WS | `hocuspocus-server/` | Node.js / Hocuspocus / Y.js |
+| Ask-AI | `ask-ai-service/` | FastAPI / LiteLLM (Groq, Gemini, NVIDIA) |
 
 ## Tech Stack
 
@@ -107,7 +147,7 @@ confirmed repeatedly throughout both sessions.
 | Framework | Next.js 16.2.9 (App Router) | React 19 |
 | Editor | Plate.js v53 | `@platejs/*` packages |
 | Styling | Tailwind CSS v4 + shadcn/ui | `components.json` driven |
-| AI (FE) | Google Gemini (`@ai-sdk/google`) | routes under `src/app/api/ai/` |
+| AI | `ask-ai-service/` (FastAPI + LiteLLM) | called by `src/app/api/ai/command/route.ts` |
 | State | React context (`lib/store/document-store.tsx`) | no redux/zustand |
 | Language (BE) | Python 3.11+ | |
 | Framework (BE) | FastAPI + Pydantic v2 | async throughout |
@@ -130,14 +170,25 @@ cd backend && python run.py         # http://localhost:8000
 
 # Collaboration server
 cd hocuspocus-server && npm run dev # WebSocket default port
+
+# Ask-AI service (editor AI backend)
+cd ask-ai-service && python run.py  # http://localhost:8001 (GET /health)
 ```
 
 ## Environment Variables
 
 **frontend/.env.local**
 ```
-GOOGLE_GENERATIVE_AI_API_KEY=<gemini key>
 NEXT_PUBLIC_API_URL=http://localhost:8000/api  # defaults to this if unset
+ASK_AI_URL=http://localhost:8001               # Ask-AI service (server-side only)
+```
+
+**ask-ai-service/.env** (copy from `.env.example`)
+```
+GROQ_API_KEY=...     # provider keys live ONLY here
+GEMINI_API_KEY=...
+NVIDIA_API_KEY=...
+PORT=8001
 ```
 
 **backend/.env** (copy from `.env.example`)
@@ -248,7 +299,8 @@ docs: <docs/comments only>
 | Change DB schema | `backend/app/models/database_models.py` + new Alembic migration |
 | Add editor plugin | `frontend/src/components/editor/plugins/` |
 | Add a page | `frontend/src/app/<route>/page.tsx` |
-| Change AI prompts | `frontend/src/app/api/ai/command/prompt/` |
+| Change AI prompts | `frontend/src/app/api/ai/command/prompt/` (editor-side) + `ask-ai-service/src/llm/prompt_templates.py` (service-side) |
+| Change AI models / rate limits | `ask-ai-service/config.yaml` |
 | Change RBAC permissions | `backend/app/main.py::ROLE_PERMISSIONS` |
 | Add collab feature | `hocuspocus-server/server.js` |
 
@@ -469,7 +521,13 @@ deploy. Backend list items now include `updated_at` (browser sort/labels work).
 **Deploy checklist (Vercel + backend/collab hosts)**
 - Vercel env: `NEXT_PUBLIC_API_URL=https://<backend>/api`,
   `NEXT_PUBLIC_COLLAB_URL=wss://<hocuspocus>` (MUST be wss:// on https pages),
-  `GOOGLE_GENERATIVE_AI_API_KEY`.
+  `ASK_AI_URL=https://<ask-ai-service-on-render>` (+ optional
+  `ASK_AI_SERVICE_TOKEN`, must equal the service's). The old
+  `GOOGLE_GENERATIVE_AI_API_KEY` is no longer used by the Ask-AI path.
+- ask-ai-service: deploy via repo-root `render.yaml` (or manually: rootDir
+  `ask-ai-service`, build `pip install -r requirements.txt`, start
+  `python run.py`, health `/health`) with real `GROQ_API_KEY` /
+  `GEMINI_API_KEY` / `NVIDIA_API_KEY`.
 - Backend: deploy with `AUTO_MIGRATE=1` (applies `0006_version_content`) or run
   `alembic upgrade head` manually. CORS_ORIGINS must include the Vercel domain.
 - hocuspocus-server: mandatory infra; needs `JWT_SECRET` (= backend
