@@ -197,21 +197,33 @@ function ComparePane({
 export function CompareView({
   docId,
   snapshotId,
+  compareToId,
+  footer,
   onClose,
 }: {
   docId: string;
   snapshotId: string;
+  /** Version to diff AGAINST. Omitted → the live (current) document. */
+  compareToId?: string;
+  /** Floating overlay content pinned to the bottom (e.g. the review bar). */
+  footer?: React.ReactNode;
   onClose: () => void;
 }) {
   // The compare overlay renders inside the editor's <Plate> tree, so this is
   // the live (Yjs-canonical) editor — its children ARE the current document.
   // (The REST body is intentionally blank; diffing against it showed the whole
   // document as deleted, which was the "version diff broken" bug.)
+  // Unused when `compareToId` pins the new side to a frozen version instead.
   const liveEditor = useEditorRef();
-  const [snapshot, setSnapshot] = React.useState<DocSnapshot | null>(null);
+  const [oldSnapshot, setOldSnapshot] = React.useState<DocSnapshot | null>(null);
+  const [newSnapshot, setNewSnapshot] = React.useState<DocSnapshot | null>(null);
   const [diffValue, setDiffValue] = React.useState<Value | null>(null);
   const [aiOn, setAiOn] = React.useState(false);
   const [loading, setLoading] = React.useState(true);
+
+  const newLabel = compareToId
+    ? (newSnapshot?.label ?? "Selected version")
+    : "Current version";
 
   const leftRef = React.useRef<HTMLDivElement | null>(null);
   const rightRef = React.useRef<HTMLDivElement | null>(null);
@@ -221,18 +233,27 @@ export function CompareView({
     let cancelled = false;
     (async () => {
       setLoading(true);
-      const snap = await getSnapshot(docId, snapshotId);
+      const [oldSnap, newSnap] = await Promise.all([
+        getSnapshot(docId, snapshotId),
+        compareToId ? getSnapshot(docId, compareToId) : Promise.resolve(null),
+      ]);
       if (cancelled) return;
-      if (!snap?.value) {
-        setSnapshot(snap);
+      setOldSnapshot(oldSnap);
+      setNewSnapshot(newSnap);
+      // The new side is a frozen version when `compareToId` is set (reviewing a
+      // submission against an approved baseline — neither is the live doc), and
+      // the live editor value otherwise (version history's "vs current" diff).
+      const newValue = compareToId
+        ? (newSnap?.value ?? null)
+        : (structuredClone(liveEditor.children) as Value);
+      if (!oldSnap?.value || !newValue) {
         setLoading(false);
         return;
       }
-      // Diff old → current. aiEdit/comment marks are ignored so they don't
+      // Diff old → new. aiEdit/comment marks are ignored so they don't
       // register as textual changes (they're rendered separately).
-      const current = structuredClone(liveEditor.children) as Value;
       const base = createSlateEditor({ plugins: BaseEditorKit });
-      const value = computeDiff(snap.value, current, {
+      const value = computeDiff(oldSnap.value, newValue, {
         isInline: base.api.isInline,
         // Character-level (intra-line) diff instead of whole-block replace.
         // Without these, computeDiff's default node matcher gives up on an
@@ -258,7 +279,6 @@ export function CompareView({
         // `aiEdit` is ignored so attribution marks aren't seen as text changes.
         ignoreProps: [AI_EDIT_KEY, "id"],
       });
-      setSnapshot(snap);
       setDiffValue(value as Value);
       setLoading(false);
     })();
@@ -266,7 +286,7 @@ export function CompareView({
       cancelled = true;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [docId, snapshotId]);
+  }, [docId, snapshotId, compareToId]);
 
   // Ratio-based synced scrolling (block heights differ between versions).
   const onScroll = React.useCallback((from: Side) => {
@@ -292,9 +312,9 @@ export function CompareView({
           <span className="font-ui-lg text-ui-lg font-semibold text-text-primary">
             Compare documents
           </span>
-          {snapshot && (
+          {oldSnapshot && (
             <span className="font-ui-sm text-ui-sm text-text-secondary">
-              {snapshot.label} → Current
+              {oldSnapshot.label} → {newLabel}
             </span>
           )}
         </div>
@@ -333,28 +353,30 @@ export function CompareView({
       {/* Pane headers */}
       <div className="flex shrink-0 border-b border-border-subtle bg-panel-surface font-ui-sm text-ui-sm font-semibold text-text-secondary">
         <div className="flex-1 border-r border-border-subtle px-lg py-2">
-          {snapshot ? snapshot.label : "Older version"}
+          {oldSnapshot ? oldSnapshot.label : "Older version"}
           <span className="ml-2 font-normal text-text-muted">(older)</span>
         </div>
         <div className="flex-1 px-lg py-2">
-          Current version
-          <span className="ml-2 font-normal text-text-muted">(latest)</span>
+          {newLabel}
+          <span className="ml-2 font-normal text-text-muted">
+            {compareToId ? "(under review)" : "(latest)"}
+          </span>
         </div>
       </div>
 
-      {/* Panes */}
-      <div className="flex min-h-0 flex-1">
-        {!loading && snapshot && !snapshot.value ? (
+      {/* Panes. Reserve room for the floating footer so it never covers text. */}
+      <div className={cn("flex min-h-0 flex-1", footer && "pb-40")}>
+        {loading ? (
+          <div className="flex flex-1 items-center justify-center text-text-muted">
+            <Icon name="progress_activity" className="animate-spin text-[28px]" />
+          </div>
+        ) : !diffValue ? (
           <div className="flex flex-1 flex-col items-center justify-center gap-2 text-text-muted">
             <Icon name="history_toggle_off" className="text-[32px]" />
             <p className="font-ui-sm text-ui-sm">
-              This version was saved before content snapshots existed, so there
-              is nothing to compare.
+              One of these versions has no captured content, so there is nothing
+              to compare.
             </p>
-          </div>
-        ) : loading || !diffValue ? (
-          <div className="flex flex-1 items-center justify-center text-text-muted">
-            <Icon name="progress_activity" className="animate-spin text-[28px]" />
           </div>
         ) : (
           <>
@@ -379,6 +401,12 @@ export function CompareView({
           </>
         )}
       </div>
+
+      {footer && (
+        <div className="pointer-events-none absolute inset-x-0 bottom-0 flex justify-center p-lg">
+          <div className="pointer-events-auto w-full max-w-[52rem]">{footer}</div>
+        </div>
+      )}
     </div>
   );
 }

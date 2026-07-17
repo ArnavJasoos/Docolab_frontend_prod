@@ -1,6 +1,7 @@
 "use client";
 
 import * as React from "react";
+import dynamic from "next/dynamic";
 import { toast } from "sonner";
 import { useEditorRef } from "platejs/react";
 
@@ -19,7 +20,17 @@ import { useDocument } from "@/lib/store/document-store";
 import type { UiRole } from "@/lib/roles";
 import { listVersions, submitForApproval, approveVersion, rejectVersion } from "@/lib/api/versions";
 import { createRecommendation } from "@/lib/api/recommendations";
+import { getSnapshots, type DocSnapshot } from "@/lib/api/snapshots";
 import { isBlankValue } from "@/lib/api/seed";
+
+// Loaded on demand: the diff overlay pulls the whole compare/diff UI, which
+// has no place in the top bar's initial chunk.
+const CompareView = dynamic(
+  () => import("@/components/editor/compare-view").then((m) => m.CompareView),
+  { ssr: false },
+);
+
+type Decision = "approve" | "reject";
 
 const ROLE_TONE: Record<UiRole, string> = {
   Owner: "bg-insertion-bg text-insertion-text",
@@ -114,6 +125,12 @@ export function RoleActions() {
   const [pendingVersionId, setPendingVersionId] = React.useState<string | null>(null);
   const [pendingVersionNo, setPendingVersionNo] = React.useState<number | null>(null);
   const [reviewOpen, setReviewOpen] = React.useState(false);
+  // Approved version the pending submission is being diffed against. Set →
+  // the full-screen compare overlay replaces the review modal.
+  const [compareBaseId, setCompareBaseId] = React.useState<string | null>(null);
+  // Lifted so text typed in the modal survives the switch to the overlay's
+  // floating bar (and back), which are never mounted at the same time.
+  const [feedback, setFeedback] = React.useState("");
 
   const refreshPending = React.useCallback(async () => {
     if (!caps.canApprove) return;
@@ -142,6 +159,39 @@ export function RoleActions() {
       window.removeEventListener("focus", onFocus);
     };
   }, [refreshPending, status]);
+
+  // The one decision path, shared by the review modal and the compare
+  // overlay's floating bar so both behave identically.
+  const commitDecision = React.useCallback(
+    async (decision: Decision, note: string) => {
+      if (!pendingVersionId) return;
+      if (decision === "approve") await approveVersion(pendingVersionId);
+      else await rejectVersion(pendingVersionId);
+      if (note.trim()) {
+        try {
+          await createRecommendation(pendingVersionId, note.trim());
+        } catch {
+          toast.warning("Decision saved, but feedback could not be attached");
+        }
+      }
+    },
+    [pendingVersionId],
+  );
+
+  const afterDecision = React.useCallback(() => {
+    setReviewOpen(false);
+    setCompareBaseId(null);
+    setFeedback("");
+    void refreshPending();
+    // Approve/reject changed the doc's status + version — reflect it in the
+    // top bar immediately.
+    void refreshDoc();
+  }, [refreshPending, refreshDoc]);
+
+  const closeReview = () => {
+    setReviewOpen(false);
+    setFeedback("");
+  };
 
   const onSubmit = async () => {
     const content = structuredClone(editor.children);
@@ -198,26 +248,36 @@ export function RoleActions() {
         </button>
         {reviewOpen && (
           <ApprovalFeedbackDialog
+            docId={docId}
             versionNo={pendingVersionNo ?? 0}
-            onClose={() => setReviewOpen(false)}
-            onCommit={async (decision, feedback) => {
-              if (decision === "approve") await approveVersion(pendingVersionId);
-              else await rejectVersion(pendingVersionId);
-              if (feedback.trim()) {
-                try {
-                  await createRecommendation(pendingVersionId, feedback.trim());
-                } catch {
-                  toast.warning("Decision saved, but feedback could not be attached");
-                }
-              }
-            }}
-            onDone={() => {
+            feedback={feedback}
+            onFeedbackChange={setFeedback}
+            onCompare={(baseVersionId) => {
               setReviewOpen(false);
-              void refreshPending();
-              // Approve/reject changed the doc's status + version — reflect it
-              // in the top bar immediately.
-              void refreshDoc();
+              setCompareBaseId(baseVersionId);
             }}
+            onClose={closeReview}
+            onCommit={commitDecision}
+            onDone={afterDecision}
+          />
+        )}
+        {compareBaseId && (
+          <CompareView
+            docId={docId}
+            snapshotId={compareBaseId}
+            // Both sides are frozen versions here: an approved baseline vs the
+            // submission under review. Neither is the live document.
+            compareToId={pendingVersionId}
+            onClose={() => setCompareBaseId(null)}
+            footer={
+              <ApprovalReviewBar
+                versionNo={pendingVersionNo ?? 0}
+                feedback={feedback}
+                onFeedbackChange={setFeedback}
+                onCommit={commitDecision}
+                onDone={afterDecision}
+              />
+            }
           />
         )}
       </>
@@ -234,22 +294,61 @@ export function RoleActions() {
  * recommendation; for a local snapshot it mirrors the decision locally.
  */
 export function ApprovalFeedbackDialog({
+  docId,
   versionNo,
+  feedback,
+  onFeedbackChange,
+  onCompare,
   onClose,
   onDone,
   onCommit,
 }: {
+  docId: string;
   versionNo: number;
+  feedback: string;
+  onFeedbackChange: (value: string) => void;
+  /** Open the diff against a previously approved version. */
+  onCompare: (baseVersionId: string) => void;
   onClose: () => void;
   onDone: () => void;
-  onCommit: (decision: "approve" | "reject", feedback: string) => Promise<void>;
+  onCommit: (decision: Decision, feedback: string) => Promise<void>;
 }) {
-  const [decision, setDecision] = React.useState<"approve" | "reject" | null>(null);
-  const [feedback, setFeedback] = React.useState("");
+  const [decision, setDecision] = React.useState<Decision | null>(null);
   const [busy, setBusy] = React.useState(false);
+  // Only APPROVED versions are offered as a comparison baseline: the point is
+  // "what changed since the last thing a Manager signed off on". null = still
+  // loading, [] = this doc has never had a version approved.
+  const [baselines, setBaselines] = React.useState<DocSnapshot[] | null>(null);
+  const [baseId, setBaseId] = React.useState<string | null>(null);
+
+  React.useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const all = await getSnapshots(docId);
+        if (cancelled) return;
+        const approved = all.filter((s) => s.kind === "approved");
+        setBaselines(approved);
+        // getSnapshots sorts newest-first, so default to the latest approved
+        // version — the baseline a reviewer almost always wants.
+        setBaseId(approved[0]?.id ?? null);
+      } catch {
+        if (!cancelled) setBaselines([]);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [docId]);
+
+  const selectedBaseline = baselines?.find((s) => s.id === baseId) ?? null;
+  const baselineLabel =
+    baselines === null
+      ? "Loading versions…"
+      : (selectedBaseline?.label ?? "No approved versions yet");
 
   const commit = async () => {
-    if (!decision) return;
+    if (!decision || !feedback.trim()) return;
     setBusy(true);
     try {
       await onCommit(decision, feedback);
@@ -308,12 +407,49 @@ export function ApprovalFeedbackDialog({
           </button>
         </div>
 
+        <div className="mb-4">
+          <div className="flex items-center gap-2">
+            <button
+              onClick={() => baseId && onCompare(baseId)}
+              disabled={!baseId}
+              className="flex shrink-0 items-center gap-1.5 rounded-md border border-border-subtle px-3 py-2 font-ui-sm text-ui-sm font-semibold text-text-secondary transition-colors hover:bg-surface-container disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              <Icon name="difference" size={18} /> Compare with:
+            </button>
+            <DropdownMenu>
+              <DropdownMenuTrigger
+                disabled={!baseId}
+                className="flex min-w-0 flex-1 items-center justify-between gap-1 rounded-md border border-border-subtle px-3 py-2 font-ui-sm text-ui-sm text-text-primary outline-none transition-colors hover:bg-surface-container focus-visible:ring-2 focus-visible:ring-primary-container disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                <span className="truncate">{baselineLabel}</span>
+                <Icon name="expand_more" size={16} />
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="end" className="max-h-64 min-w-56 overflow-y-auto">
+                <DropdownMenuLabel className="font-ui-xs text-ui-xs text-text-muted">
+                  Approved versions
+                </DropdownMenuLabel>
+                {baselines?.map((s) => (
+                  <DropdownMenuItem key={s.id} onSelect={() => setBaseId(s.id)}>
+                    <span className="flex-1 truncate">{s.label}</span>
+                    {baseId === s.id && <Icon name="check" size={16} />}
+                  </DropdownMenuItem>
+                ))}
+              </DropdownMenuContent>
+            </DropdownMenu>
+          </div>
+          {baselines?.length === 0 && (
+            <p className="mt-1.5 font-ui-xs text-ui-xs text-text-muted">
+              No approved versions yet — nothing to compare against.
+            </p>
+          )}
+        </div>
+
         <label className="mb-1 block font-ui-xs text-ui-xs font-semibold text-text-secondary">
-          Feedback to the team {decision === "reject" && <span className="text-status-error">(recommended)</span>}
+          Feedback to the team <span className="text-status-error">(required)</span>
         </label>
         <textarea
           value={feedback}
-          onChange={(e) => setFeedback(e.target.value)}
+          onChange={(e) => onFeedbackChange(e.target.value)}
           rows={4}
           placeholder="Describe what to change or why this is approved…"
           className="mb-4 w-full resize-none rounded-md border border-border-subtle bg-surface-container-low p-2.5 font-ui-sm text-ui-sm text-text-primary focus:border-primary focus:ring-1 focus:ring-primary focus:outline-none"
@@ -328,13 +464,102 @@ export function ApprovalFeedbackDialog({
           </button>
           <button
             onClick={() => void commit()}
-            disabled={!decision || busy}
-            className="rounded-md bg-primary-container px-4 py-1.5 font-ui-sm text-ui-sm font-semibold text-on-primary hover:bg-accent-hover disabled:opacity-50"
+            disabled={!decision || busy || !feedback.trim()}
+            title={
+              !decision
+                ? "Choose Approve or Decline first"
+                : !feedback.trim()
+                  ? "Feedback is required"
+                  : undefined
+            }
+            className="rounded-md bg-primary-container px-4 py-1.5 font-ui-sm text-ui-sm font-semibold text-on-primary hover:bg-accent-hover disabled:cursor-not-allowed disabled:opacity-50"
           >
             {busy ? "Saving…" : "Submit decision"}
           </button>
         </div>
       </DialogContent>
     </Dialog>
+  );
+}
+
+/**
+ * The decision surface while the compare overlay is open: a floating bar
+ * pinned to the bottom with the feedback box and both decisions inline, so a
+ * Manager can act on what they're reading without leaving the diff. Approve /
+ * Decline commit immediately (no separate confirm step — the diff above IS the
+ * review), then `onDone` tears the overlay down back to the editor.
+ */
+function ApprovalReviewBar({
+  versionNo,
+  feedback,
+  onFeedbackChange,
+  onCommit,
+  onDone,
+}: {
+  versionNo: number;
+  feedback: string;
+  onFeedbackChange: (value: string) => void;
+  onCommit: (decision: Decision, feedback: string) => Promise<void>;
+  onDone: () => void;
+}) {
+  const [busy, setBusy] = React.useState<Decision | null>(null);
+  // Feedback is mandatory here exactly as it is in the review modal — the bar
+  // commits on click with no confirm step, so this is the only gate.
+  const missingFeedback = !feedback.trim();
+
+  const act = async (decision: Decision) => {
+    if (missingFeedback) return;
+    setBusy(decision);
+    try {
+      await onCommit(decision, feedback);
+      toast.success(
+        decision === "approve"
+          ? `Version ${versionNo} approved`
+          : `Version ${versionNo} declined`,
+      );
+      onDone();
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Could not record decision");
+      // Only on failure: onDone unmounts this bar, so clearing busy after a
+      // success would set state on an unmounted component.
+      setBusy(null);
+    }
+  };
+
+  return (
+    <div className="rounded-xl border border-border-subtle bg-surface p-3 shadow-float">
+      <div className="mb-2 flex items-center gap-1.5 font-ui-xs text-ui-xs font-semibold text-text-secondary">
+        <Icon name="rate_review" size={14} className="text-primary-container" />
+        Review version {versionNo}
+        <span className="text-status-error">· feedback required</span>
+      </div>
+      <div className="flex items-end gap-2">
+        <textarea
+          value={feedback}
+          onChange={(e) => onFeedbackChange(e.target.value)}
+          rows={2}
+          placeholder="Describe what to change or why this is approved…"
+          className="min-w-0 flex-1 resize-none rounded-md border border-border-subtle bg-surface-container-low p-2.5 font-ui-sm text-ui-sm text-text-primary focus:border-primary focus:ring-1 focus:ring-primary focus:outline-none"
+        />
+        <button
+          onClick={() => void act("approve")}
+          disabled={busy !== null || missingFeedback}
+          title={missingFeedback ? "Feedback is required" : undefined}
+          className="flex shrink-0 items-center gap-1.5 rounded-md border border-insertion-text bg-insertion-bg px-3 py-2 font-ui-sm text-ui-sm font-semibold text-insertion-text transition-opacity hover:opacity-80 disabled:cursor-not-allowed disabled:opacity-50"
+        >
+          <Icon name="check_circle" size={18} />
+          {busy === "approve" ? "Approving…" : "Approve"}
+        </button>
+        <button
+          onClick={() => void act("reject")}
+          disabled={busy !== null || missingFeedback}
+          title={missingFeedback ? "Feedback is required" : undefined}
+          className="flex shrink-0 items-center gap-1.5 rounded-md border border-status-error bg-status-error/10 px-3 py-2 font-ui-sm text-ui-sm font-semibold text-status-error transition-opacity hover:opacity-80 disabled:cursor-not-allowed disabled:opacity-50"
+        >
+          <Icon name="cancel" size={18} />
+          {busy === "reject" ? "Declining…" : "Decline"}
+        </button>
+      </div>
+    </div>
   );
 }
