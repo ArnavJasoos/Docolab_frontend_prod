@@ -5,6 +5,7 @@ import { toast } from "sonner";
 
 import { Icon } from "@/components/icon";
 import { InitialsAvatar } from "@/components/admin/avatar";
+import { useAdmin } from "@/components/admin/admin-guard";
 import { ApiError } from "@/lib/api/client";
 import {
   userDocuments,
@@ -37,6 +38,7 @@ export function UserModal({
   onClose: () => void;
   onChanged: () => void;
 }) {
+  const admin = useAdmin();
   const [docs, setDocs] = React.useState<AdminDoc[] | null>(null);
   const [addOpen, setAddOpen] = React.useState(false);
   const [addQuery, setAddQuery] = React.useState("");
@@ -128,8 +130,23 @@ export function UserModal({
     }
   };
 
+  const disabled = user.status === "disabled";
+
+  // Mirrors the delisting guards in PATCH /admin/users/{id}/membership: nobody
+  // delists themselves or the primary admin, and only the primary admin may
+  // delist a fellow admin. Reactivating stays open to any admin.
+  const delistBlockReason =
+    user.id === admin.id
+      ? "You cannot delist your own account"
+      : user.is_super_admin
+        ? "The primary administrator account cannot be delisted"
+        : user.is_admin && !admin.is_super_admin
+          ? "Only the primary administrator can delist an admin account"
+          : null;
+
   const toggleMembership = async () => {
     const activating = user.status === "disabled";
+    if (!activating && delistBlockReason) return;
     if (!activating && !confirm(`Delist ${user.display_name}? They will no longer be able to sign in.`)) return;
     setBusy(true);
     try {
@@ -143,8 +160,6 @@ export function UserModal({
       setBusy(false);
     }
   };
-
-  const disabled = user.status === "disabled";
 
   return (
     <div className="gl-overlay" onMouseDown={onClose}>
@@ -177,7 +192,8 @@ export function UserModal({
             </button>
             <button
               onClick={toggleMembership}
-              disabled={busy}
+              disabled={busy || (!disabled && delistBlockReason !== null)}
+              title={!disabled && delistBlockReason ? delistBlockReason : undefined}
               className={`gl-btn px-3 py-1.5 text-xs font-medium ${disabled ? "gl-btn-solid" : "gl-btn-danger"}`}
             >
               <Icon name={disabled ? "person_check" : "person_remove"} className="text-[16px]" />

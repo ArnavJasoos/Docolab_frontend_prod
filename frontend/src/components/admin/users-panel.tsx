@@ -44,25 +44,25 @@ export function UsersPanel({
 
   return (
     <div className="gl-card flex flex-1 flex-col overflow-hidden">
-      <div className="gl-card-header flex items-center justify-between px-6 py-4">
+      <div className="gl-card-header space-y-3 px-6 py-4">
         <h3 className="flex items-center gap-2 font-medium text-[var(--gl-on-surface)]">
           <Icon name="groups" className="text-base text-[rgba(125,211,252,0.8)]" />
-          Active Directory
+          Users
           <span className="rounded-full bg-[rgba(74,222,128,0.12)] px-2 py-0.5 text-[10px] font-medium text-[#4ade80]">
             {onlineCount} online
           </span>
         </h3>
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-3">
           {admin.is_super_admin && (
             <button
               onClick={() => setAddAdminOpen(true)}
-              className="gl-btn px-3 py-1.5 text-xs font-medium"
+              className="gl-btn flex-1 px-3 py-2 text-xs font-medium"
               title="Create another admin account"
             >
               <Icon name="shield_person" className="text-[16px]" /> Add Admin
             </button>
           )}
-          <button onClick={() => setAddOpen(true)} className="gl-btn px-3 py-1.5 text-xs font-medium">
+          <button onClick={() => setAddOpen(true)} className="gl-btn flex-1 px-3 py-2 text-xs font-medium">
             <Icon name="person_add" className="text-[16px]" /> Add User
           </button>
         </div>
