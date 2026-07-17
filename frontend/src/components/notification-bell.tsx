@@ -71,6 +71,10 @@ function ago(iso: string): string {
 
 const MAX_SHOWN = 20;
 
+/** Badge refresh cadence. Matches the document-store governance poll so the
+ *  bell and the status pill can't disagree for long. */
+const POLL_MS = 15_000;
+
 /**
  * Notification bell: click to open a dropdown of recent notifications
  * (submissions pending review, approvals/rejections, reviewer feedback).
@@ -83,28 +87,58 @@ export function NotificationBell() {
   const [items, setItems] = React.useState<Notif[] | null>(null);
   const [titles, setTitles] = React.useState<Record<string, string>>({});
 
-  // Re-fetches everything on each call (list is capped at MAX_SHOWN and only
-  // called on mount / popover-open, not on a tight loop, so re-resolving a
-  // handful of doc titles every time is cheap and avoids a stale-closure ref).
-  const load = React.useCallback(async () => {
+  // Cheap: one request, drives the unread badge. Safe to run on a timer.
+  // Document titles are NOT resolved here — that is an extra request per
+  // distinct document, which on a 15s poll would be a steady N+1 against the
+  // backend for data nobody is looking at until the popover opens.
+  // Returns the fresh list so a caller can chain on it directly rather than
+  // reading state that has not committed yet.
+  const refresh = React.useCallback(async (): Promise<Notif[]> => {
     try {
-      const list = await notificationsApi.listNotifications(false);
-      const capped = list.slice(0, MAX_SHOWN);
-      setItems(capped);
-      const ids = [...new Set(capped.map((n) => n.document_id))];
-      const docs = await Promise.all(
-        ids.map((id) => documentsApi.getDocument(id).catch(() => null)),
-      );
-      setTitles(Object.fromEntries(ids.map((id, i) => [id, docs[i]?.title ?? "Untitled document"])));
+      const list = (await notificationsApi.listNotifications(false)).slice(0, MAX_SHOWN);
+      setItems(list);
+      return list;
     } catch {
-      /* backend unreachable — leave whatever was last loaded */
+      /* backend unreachable — leave whatever was last loaded on screen */
+      return [];
     }
   }, []);
 
+  // Resolve the titles the popover is about to render, skipping any already
+  // cached, so reopening it costs nothing.
+  const loadTitles = React.useCallback(
+    async (list: Notif[]) => {
+      const missing = [...new Set(list.map((n) => n.document_id))].filter(
+        (id) => !(id in titles),
+      );
+      if (missing.length === 0) return;
+      const docs = await Promise.all(
+        missing.map((id) => documentsApi.getDocument(id).catch(() => null)),
+      );
+      setTitles((prev) => ({
+        ...prev,
+        ...Object.fromEntries(
+          missing.map((id, i) => [id, docs[i]?.title ?? "Untitled document"]),
+        ),
+      }));
+    },
+    [titles],
+  );
+
+  // Keep the badge LIVE. Without this the bell only ever reflected the state at
+  // page load: a submission/approval arriving afterwards lit nothing until the
+  // user reopened the popover or reloaded. Mirrors the document-store poll.
   React.useEffect(() => {
-    // eslint-disable-next-line react-hooks/set-state-in-effect -- initial fetch on mount, guarded internally by load()'s own try/catch
-    void load();
-  }, [load]);
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- async fetch; state is set inside the callback
+    void refresh();
+    const interval = setInterval(() => void refresh(), POLL_MS);
+    const onFocus = () => void refresh();
+    window.addEventListener("focus", onFocus);
+    return () => {
+      clearInterval(interval);
+      window.removeEventListener("focus", onFocus);
+    };
+  }, [refresh]);
 
   const unreadCount = items?.filter((n) => !n.read_at).length ?? 0;
 
@@ -128,7 +162,12 @@ export function NotificationBell() {
   };
 
   return (
-    <Popover onOpenChange={(v) => v && void load()}>
+    <Popover
+      onOpenChange={(v) => {
+        if (!v) return;
+        void refresh().then(loadTitles);
+      }}
+    >
       <PopoverTrigger
         aria-label={unreadCount > 0 ? `Notifications (${unreadCount} unread)` : "Notifications"}
         className="relative flex size-8 items-center justify-center rounded-full text-on-surface-variant outline-none transition-colors hover:bg-surface-container focus-visible:ring-2 focus-visible:ring-primary-container"
